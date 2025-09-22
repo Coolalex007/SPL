@@ -7,33 +7,72 @@ using Unity.VisualScripting;
 public class Grid_Script : MonoBehaviour
 {
     // Start is called once before the first execution of Update after the MonoBehaviour is created
+    public class Item
+    {
+        public string Name;
+        public double Value;
+        public GameObject ItemObject;
+
+        public Item(string name, GameObject gameObject)
+        {
+            Name = name;
+            Value = 0;
+            ItemObject = gameObject;
+        }
+    }
+
+
     public class Building
     {
-        public GameObject CurrentItem;
+        private Item _currentItem;
+        public GameObject CurrentItemObject;
         public bool IsActive;
         public char Rotation;
+        public int xPos, yPos;
 
+        public Item CurrentItem
+        {
+            get => _currentItem;
+            set
+            {
+                _currentItem = value;
+                if (_currentItem is null)
+                {
+                    CurrentItem.ItemObject = null;
+                }
+                else
+                {
+                    
+                    CurrentItemObject = CurrentItem.ItemObject;
+                    
+                }
+            }
+        }
     }
 
     public class Conveyor : Building
     {
         public float ConveyorSpeed;
-
+        private float CurrentLerp;
+        private int Endpoint = 1;
+        private LineRenderer _lineRenderer;
 
         public Conveyor()
         {
             ConveyorSpeed = 0;
-            CurrentItem = null;
+            CurrentItemObject = null;
             IsActive = true;
             Rotation = 'N';
+            xPos = 0;
+            yPos = 0;
             
         }
 
         public Conveyor(GameObject conveyorObject)
         {
             ConveyorSpeed = 1.0f;
-            CurrentItem = null;
-            IsActive = true;
+            CurrentItemObject = null;
+            IsActive = false;
             float zRotation = conveyorObject.transform.eulerAngles.z;
             switch (zRotation)
             {
@@ -50,16 +89,47 @@ public class Grid_Script : MonoBehaviour
                     Rotation = 'W';
                     break;
             }
+            xPos = Convert.ToInt32(Mathf.Floor(conveyorObject.transform.position.x / X_WIDTH));
+            yPos = Convert.ToInt32(Mathf.Floor(conveyorObject.transform.position.y / Y_WIDTH));
         }
+
+        public void Tick()
+        {
+            if (CurrentItemObject is not null)
+            {
+                Debug.Log("movingObject");
+                CurrentItemObject.transform.position = Vector3.Lerp(_lineRenderer.GetPosition(Endpoint - 1), _lineRenderer.GetPosition(Endpoint), CurrentLerp);
+                CurrentLerp += ConveyorSpeed * Time.deltaTime;
+
+                if (CurrentLerp >= 1)
+                {
+                    if (FindNextBuilding(this, xPos, yPos))
+                    {
+                        CurrentLerp = 0;
+                    }
+                    else
+                    {
+                        CurrentLerp = 1;
+                    }
+
+                }
+            }
+
+        }
+
+        
+
+        
     }
 
     public static int GridSizeX = 26;
     public static int GridSizeY = 15;
     public const float X_WIDTH = 0.64f;
     public const float Y_WIDTH = 0.64f;
-    public GameObject[,] Buildings = new GameObject[GridSizeX, GridSizeY];
+    public static Building[,] Buildings = new Building[GridSizeX, GridSizeY];
 
     public GameObject conveyorPrefab; // Das Prefab des Conveyors
+    public GameObject orePrefab;
     public float rotationSpeed = 10f; // Geschwindigkeit, mit der der Conveyor gedreht wird
     private GameObject currentConveyor; // Der aktuell platzierte Conveyor
 
@@ -108,10 +178,14 @@ public class Grid_Script : MonoBehaviour
 
             if (Buildings[xGrid, yGrid] == null)
             {
+                Conveyor conveyor = new Conveyor(currentConveyor);
                 conveyorChosen = false;
+                conveyor.IsActive = true;
                 Debug.Log($"Conveyor placed. Grid Coords: {(placePosition.x - 0.32f) / X_WIDTH}, {(placePosition.y - 0.32f) / Y_WIDTH}");
 
-                Buildings[xGrid, yGrid] = currentConveyor;
+                Buildings[xGrid, yGrid] = conveyor;
+                isPlacingConveyor = false;
+                currentConveyor = null;
             }
 
         }
@@ -152,14 +226,100 @@ public class Grid_Script : MonoBehaviour
     }
 
     bool isPlacingConveyor = false;
+    bool isDebugItemPlacing = false;
     void Update()
     {
         if (isPlacingConveyor)
         {
             PlacingConveyor();
         }
+        if (isDebugItemPlacing)
+        {
+            PlacingItem();
+        }
+
+        for(int i = 0; i < GridSizeX; i++)
+        {
+            for (int j = 0; j < GridSizeY; j++)
+            {
+                if (Buildings[i,j] is Conveyor)
+                {
+                    Conveyor conveyor = Buildings[i,j] as Conveyor;
+                    conveyor.Tick();
+                }
+            }
+        }
 
 
+    }
+
+    bool ItemChosen = false;
+    Item CurrentItem;
+    void PlacingItem()
+    {
+        Vector3 placePosition = FindMouseGridCoords();
+        if (!ItemChosen)
+        {
+            GameObject newItem = Instantiate(orePrefab, FindMouseGridCoords(), Quaternion.identity);
+            CurrentItem = new Item("NewTestOre", newItem);
+            ItemChosen = true;
+        }
+        else
+        {
+            if (Input.GetMouseButtonDown(0))
+            {
+                
+                int xGrid = Convert.ToInt32((placePosition.x - 0.32f) / X_WIDTH);
+                int yGrid = Convert.ToInt32((placePosition.y - 0.32f) / Y_WIDTH);
+                
+                if (Buildings[xGrid, yGrid] is Conveyor)
+                {
+                    Buildings[xGrid, yGrid].CurrentItem = CurrentItem;
+                    ItemChosen = false;
+                    CurrentItem = null;
+                    isDebugItemPlacing = false;
+                }
+            }
+            else
+            {
+                CurrentItem.ItemObject.transform.position = placePosition;
+            }
+        }
+
+
+        
+    }
+
+    public static bool FindNextBuilding(Conveyor conveyor, int xPos, int yPos)
+    {
+        switch (conveyor.Rotation)
+        {
+            case 'N':
+                yPos++;
+                break;
+            case 'E':
+                xPos++;
+                break;
+            case 'S':
+                yPos--;
+                break;
+            case 'W':
+                xPos--;
+                break;
+        }
+
+        Building nextBuilding = Buildings[xPos, yPos];
+        if (nextBuilding is not null)
+        {
+            if (nextBuilding.CurrentItem is null)
+            {
+                nextBuilding.CurrentItem = conveyor.CurrentItem;
+                conveyor.CurrentItem = null;
+                return true;
+            }
+
+        }
+        return false;
     }
 
     bool lockedGui = false;
@@ -172,6 +332,12 @@ public class Grid_Script : MonoBehaviour
             if (GUI.Button(new Rect(20, 40, 80, 20), "Conveyor"))
             {
                 isPlacingConveyor ^= true;
+                isDebugItemPlacing = false;
+            }
+            if (GUI.Button(new Rect(100, 40, 80, 20), "OrePlace"))
+            {
+                isDebugItemPlacing ^= true;
+                isPlacingConveyor = false;
             }
         }
 
