@@ -1,361 +1,687 @@
 using UnityEngine;
 using System;
-using UnityEngine.UIElements;
-using Unity.VisualScripting;
-
 
 public class Grid_Script : MonoBehaviour
 {
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    // ==== Grid ====
+    public static int GridSizeX = 26;
+    public static int GridSizeY = 15;
+    public const float CELL_W = 0.64f;
+    public const float CELL_H = 0.64f;
+    public const float ITEM_Z = -0.1f;
+
+    public static Building[,] Buildings = new Building[GridSizeX, GridSizeY];
+
+    // ==== Prefabs ====
+    public GameObject conveyorPrefab;
+    public GameObject orePrefab;
+    public GameObject furnacePrefab;
+    public GameObject splitter3Prefab;   // 3-Way-Splitter
+
+    // ==== Furnace Sprites ====
+    public Sprite furnaceOffSprite;
+    public Sprite furnaceOnSprite;
+
+    // ==== Platzierung ====
+    GameObject ghost;
+    bool placingConveyor;
+    bool placingFurnace;
+    bool placingSplitter;
+
+    // ==== Debug-Item auf Conveyor setzen ====
+    bool placingItemOnConveyor;
+    GameObject itemGhost;
+
+    // ==== Auswahl / Bearbeitung ====
+    Building selected;
+    bool dragging;
+
+    // ==== Datentypen ====
+    public enum Dir { N, E, S, W }
+
     public class Item
     {
-        public string Name;
-        public double Value;
-        public GameObject ItemObject;
-
-        public Item(string name, GameObject gameObject)
-        {
-            Name = name;
-            Value = 0;
-            ItemObject = gameObject;
-        }
+        public string id;
+        public GameObject go;
+        public Item(string id, GameObject go) { this.id = id; this.go = go; }
     }
-
 
     public class Building
     {
-        private Item _currentItem;
-        public GameObject CurrentItemObject;
-        public bool IsActive;
-        public char Rotation;
-        public int xPos, yPos;
+        public Item item;
+        public Dir rot;
+        public int x, y;
+        public GameObject go;
 
-        public Item CurrentItem
-        {
-            get => _currentItem;
-            set
-            {
-                _currentItem = value;
-                if (_currentItem is null)
-                {
-                    CurrentItem.ItemObject = null;
-                }
-                else
-                {
-                    
-                    CurrentItemObject = CurrentItem.ItemObject;
-                    
-                }
-            }
-        }
+        public virtual bool CanAccept(Item i) { return item == null; }
+        public virtual bool Accept(Item i) { if (!CanAccept(i)) return false; item = i; return true; }
+        public virtual void Tick(float dt) { }
+        public virtual void OnMoved() { if (go != null) go.transform.position = Center(); }
+        public virtual bool IsRotatable() { return false; }
+        public virtual void RotateClockwise() { }
+        public Vector3 Center() { return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0); }
     }
 
     public class Conveyor : Building
     {
-        public float ConveyorSpeed;
-        private float CurrentLerp;
-        private int Endpoint = 1;
-        private LineRenderer _lineRenderer;
+        public float speed = 2f;
+        float t;
+        Vector3 start, end;
 
-        public Conveyor()
+        void ResetSegment()
         {
-            ConveyorSpeed = 0;
-            CurrentItemObject = null;
-            IsActive = true;
-            Rotation = 'N';
-            xPos = 0;
-            yPos = 0;
-            
-        }
-
-        public Conveyor(GameObject conveyorObject)
-        {
-            ConveyorSpeed = 1.0f;
-            CurrentItemObject = null;
-            IsActive = false;
-            float zRotation = conveyorObject.transform.eulerAngles.z;
-            switch (zRotation)
+            start = Center();
+            Vector2 v = Vector2.zero;
+            switch (rot)
             {
-                case 0:
-                    Rotation = 'N';
-                    break;
-                case 90:
-                    Rotation = 'E';
-                    break;
-                case 180:
-                    Rotation = 'S';
-                    break;
-                case 270:
-                    Rotation = 'W';
-                    break;
+                case Dir.N: v = Vector2.up; break;
+                case Dir.E: v = Vector2.right; break;
+                case Dir.S: v = Vector2.down; break;
+                case Dir.W: v = Vector2.left; break;
             }
-            xPos = Convert.ToInt32(Mathf.Floor(conveyorObject.transform.position.x / X_WIDTH));
-            yPos = Convert.ToInt32(Mathf.Floor(conveyorObject.transform.position.y / Y_WIDTH));
+            end = start + (Vector3)(v * new Vector2(CELL_W, CELL_H));
+            t = 0f;
         }
 
-        public void Tick()
+        public void Init()
         {
-            if (CurrentItemObject is not null)
+            ResetSegment();
+            if (item != null)
             {
-                Debug.Log("movingObject");
-                CurrentItemObject.transform.position = Vector3.Lerp(_lineRenderer.GetPosition(Endpoint - 1), _lineRenderer.GetPosition(Endpoint), CurrentLerp);
-                CurrentLerp += ConveyorSpeed * Time.deltaTime;
+                Vector3 p = start; p.z = ITEM_Z;
+                item.go.transform.position = p;
+            }
+        }
 
-                if (CurrentLerp >= 1)
+        public override void Tick(float dt)
+        {
+            if (item == null) return;
+
+            t += dt * speed;
+            if (t < 1f)
+            {
+                Vector3 p = Vector3.Lerp(start, end, t);
+                p.z = ITEM_Z;
+                item.go.transform.position = p;
+                return;
+            }
+
+            var next = NextCell();
+            if (!InBounds(next.x, next.y))
+            {
+                t = 1f;
+                Vector3 pEdge = end; pEdge.z = ITEM_Z;
+                item.go.transform.position = pEdge;
+                return;
+            }
+
+            var nb = Buildings[next.x, next.y];
+            if (nb != null && nb.CanAccept(item))
+            {
+                nb.Accept(item);
+                item = null;
+                return;
+            }
+
+            t = 1f;
+            Vector3 pBlocked = end; pBlocked.z = ITEM_Z;
+            item.go.transform.position = pBlocked;
+        }
+
+        public (int x, int y) NextCell()
+        {
+            switch (rot)
+            {
+                case Dir.N: return (x, y + 1);
+                case Dir.E: return (x + 1, y);
+                case Dir.S: return (x, y - 1);
+                case Dir.W: return (x - 1, y);
+                default: return (x, y);
+            }
+        }
+
+        public override bool Accept(Item i)
+        {
+            if (!base.Accept(i)) return false;
+            ResetSegment();
+            Vector3 p = start; p.z = ITEM_Z;
+            i.go.transform.position = p;
+            return true;
+        }
+
+        public override bool IsRotatable() { return true; }
+
+        public override void RotateClockwise()
+        {
+            switch (rot)
+            {
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
+            }
+            if (go != null) go.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(rot));
+            Init();
+        }
+
+        public override void OnMoved()
+        {
+            if (go != null) go.transform.position = Center();
+            Init();
+        }
+    }
+
+    public class Furnace : Building
+    {
+        public float processTime = 2f;
+        float t;
+        public Sprite offSprite;
+        public Sprite onSprite;
+
+        void UpdateSprite()
+        {
+            if (go == null) return;
+            var sr = go.GetComponent<SpriteRenderer>();
+            if (sr == null) return;
+            sr.sprite = (item != null) ? onSprite : offSprite;
+        }
+
+        public override bool Accept(Item i)
+        {
+            if (!base.Accept(i)) return false;
+            t = 0f;
+            UpdateSprite();
+            if (i.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                i.go.transform.position = p;
+                var sr = i.go.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10;
+            }
+            return true;
+        }
+
+        public override void Tick(float dt)
+        {
+            if (item == null) return;
+            t += dt;
+            if (t >= processTime)
+            {
+                if (item.go != null) UnityEngine.Object.Destroy(item.go);
+                item = null;
+                t = 0f;
+                UpdateSprite();
+            }
+        }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            UpdateSprite();
+        }
+    }
+
+    public class Splitter3 : Building
+    {
+        int rrIndex; // 0=Left, 1=Forward, 2=Right
+
+        public override bool Accept(Item i)
+        {
+            if (!base.Accept(i)) return false;
+            if (i.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                i.go.transform.position = p;
+                var sr = i.go.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10;
+            }
+            return true;
+        }
+
+        public override void Tick(float dt)
+        {
+            if (item == null) return;
+
+            for (int k = 0; k < 3; k++)
+            {
+                int idx = (rrIndex + k) % 3;
+                Dir outDir = DirForIndex(idx); // L,F,R relativ zur aktuellen rot
+                var step = StepForDir(outDir);
+                int tx = x + step.dx;
+                int ty = y + step.dy;
+
+                if (!InBounds(tx, ty)) continue;
+
+                Building nb = Buildings[tx, ty];
+                if (nb == null) continue;                // nur ausgeben, wenn Ziel existiert
+                if (!nb.CanAccept(item)) continue;       // nur wenn Ziel frei ist
+
+                bool ok = nb.Accept(item);
+                if (ok)
                 {
-                    if (FindNextBuilding(this, xPos, yPos))
-                    {
-                        CurrentLerp = 0;
-                    }
-                    else
-                    {
-                        CurrentLerp = 1;
-                    }
-
+                    item = null;
+                    rrIndex = (idx + 1) % 3;            // Round-Robin fortsetzen
+                    break;
                 }
             }
 
-        }
-
-        
-
-        
-    }
-
-    public static int GridSizeX = 26;
-    public static int GridSizeY = 15;
-    public const float X_WIDTH = 0.64f;
-    public const float Y_WIDTH = 0.64f;
-    public static Building[,] Buildings = new Building[GridSizeX, GridSizeY];
-
-    public GameObject conveyorPrefab; // Das Prefab des Conveyors
-    public GameObject orePrefab;
-    public float rotationSpeed = 10f; // Geschwindigkeit, mit der der Conveyor gedreht wird
-    private GameObject currentConveyor; // Der aktuell platzierte Conveyor
-
-    void Start()
-    {
-
-    }
-
-    void RotateConveyor()
-    {
-        Vector3 rotationRight = new Vector3(0, 0, -90);
-        currentConveyor.transform.eulerAngles += rotationRight;
-    }
-
-    Vector3 FindMouseGridCoords()
-    {
-        Vector3 placePosition = new Vector3();
-        Vector3 vector = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-
-
-        float xPos = vector.x;
-        float yPos = vector.y;
-
-        int gridPosX = Convert.ToInt32(Mathf.Floor(xPos / X_WIDTH));
-        int gridPosY = Convert.ToInt32(Mathf.Floor(yPos / Y_WIDTH));
-
-        placePosition.x = gridPosX * 0.64f + 0.32f;
-        placePosition.y = gridPosY * 0.64f + 0.32f;
-
-        return placePosition;
-    }
-
-    bool conveyorChosen = false;
-    bool locked = false;
-    void PlacingConveyor()
-    {
-        Quaternion placeRotation = Quaternion.identity; // Keine Rotation, standardmäßig
-        Vector3 placePosition = FindMouseGridCoords();
-        bool mouseLeftPressed = Input.GetMouseButtonDown(0);
-        bool mouseLeftReleased = Input.GetMouseButtonUp(0);
-
-        if (mouseLeftPressed && conveyorChosen == true)
-        {
-            int xGrid = Convert.ToInt32((placePosition.x - 0.32f) / X_WIDTH);
-            int yGrid = Convert.ToInt32((placePosition.y - 0.32f) / Y_WIDTH);
-
-            if (Buildings[xGrid, yGrid] == null)
+            // Item visuell mittig halten, wenn blockiert
+            if (item != null && item.go != null)
             {
-                Conveyor conveyor = new Conveyor(currentConveyor);
-                conveyorChosen = false;
-                conveyor.IsActive = true;
-                Debug.Log($"Conveyor placed. Grid Coords: {(placePosition.x - 0.32f) / X_WIDTH}, {(placePosition.y - 0.32f) / Y_WIDTH}");
-
-                Buildings[xGrid, yGrid] = conveyor;
-                isPlacingConveyor = false;
-                currentConveyor = null;
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
             }
-
         }
-        else if (conveyorChosen)
-        {
 
-            currentConveyor.transform.position = placePosition;
-        }
-        else if (mouseLeftPressed && conveyorChosen == false) // Linke Maustaste
+        public override bool IsRotatable() { return true; }
+
+        public override void RotateClockwise()
         {
-            int xGrid = Convert.ToInt32((placePosition.x - 0.32f) / X_WIDTH);
-            int yGrid = Convert.ToInt32((placePosition.y - 0.32f) / Y_WIDTH);
-            if (Buildings[xGrid, yGrid] is null)
+            switch (rot)
             {
-                currentConveyor = Instantiate(conveyorPrefab, placePosition, placeRotation);
-                currentConveyor.transform.parent = this.transform;
-                conveyorChosen = true;
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
             }
-
+            if (go != null) go.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(rot));
         }
 
-
-        // Mit der rechten Maustaste kann der Conveyor rotiert werden
-        if (Input.GetKeyDown(KeyCode.R)) // Rechte Maustaste
+        public override void OnMoved()
         {
-            if (!locked)
+            base.OnMoved();
+            if (item != null && item.go != null)
             {
-                locked = true;
-                RotateConveyor();
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
             }
-
         }
-        else
+
+        Dir DirForIndex(int idx)
         {
-            locked = false;
+            if (idx == 0) return LeftOf(rot);
+            if (idx == 1) return rot;          // forward
+            return RightOf(rot);
         }
-
     }
 
-    bool isPlacingConveyor = false;
-    bool isDebugItemPlacing = false;
+    // ==== Unity ====
+
     void Update()
     {
-        if (isPlacingConveyor)
+        HandleHotkeys();
+        HandleMouse();
+
+        if (placingConveyor) UpdateGhost(conveyorPrefab);
+        if (placingFurnace) UpdateGhost(furnacePrefab);
+        if (placingSplitter) UpdateGhost(splitter3Prefab);
+
+        if (placingItemOnConveyor && itemGhost != null)
         {
-            PlacingConveyor();
-        }
-        if (isDebugItemPlacing)
-        {
-            PlacingItem();
+            var cell = MouseCell();
+            Vector3 p = CellCenter(cell.x, cell.y);
+            p.z = ITEM_Z;
+            itemGhost.transform.position = p;
         }
 
-        for(int i = 0; i < GridSizeX; i++)
+        float dt = Time.deltaTime;
+        for (int x = 0; x < GridSizeX; x++)
         {
-            for (int j = 0; j < GridSizeY; j++)
+            for (int y = 0; y < GridSizeY; y++)
             {
-                if (Buildings[i,j] is Conveyor)
-                {
-                    Conveyor conveyor = Buildings[i,j] as Conveyor;
-                    conveyor.Tick();
-                }
+                var b = Buildings[x, y];
+                if (b != null) b.Tick(dt);
             }
         }
-
-
     }
 
-    bool ItemChosen = false;
-    Item CurrentItem;
-    void PlacingItem()
+    void HandleHotkeys()
     {
-        Vector3 placePosition = FindMouseGridCoords();
-        if (!ItemChosen)
+        if (Input.GetKeyDown(KeyCode.B)) ToggleBuildMenu = !ToggleBuildMenu;
+
+        if (Input.GetKeyDown(KeyCode.R))
         {
-            GameObject newItem = Instantiate(orePrefab, FindMouseGridCoords(), Quaternion.identity);
-            CurrentItem = new Item("NewTestOre", newItem);
-            ItemChosen = true;
-        }
-        else
-        {
-            if (Input.GetMouseButtonDown(0))
+            if (selected != null && selected.IsRotatable())
             {
-                
-                int xGrid = Convert.ToInt32((placePosition.x - 0.32f) / X_WIDTH);
-                int yGrid = Convert.ToInt32((placePosition.y - 0.32f) / Y_WIDTH);
-                
-                if (Buildings[xGrid, yGrid] is Conveyor)
-                {
-                    Buildings[xGrid, yGrid].CurrentItem = CurrentItem;
-                    ItemChosen = false;
-                    CurrentItem = null;
-                    isDebugItemPlacing = false;
-                }
+                selected.RotateClockwise();
             }
+            else if (ghost != null && (placingConveyor || placingSplitter))
+            {
+                ghost.transform.Rotate(0, 0, -90);
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.X))
+        {
+            if (selected != null) DeleteSelected();
+        }
+
+        if (Input.GetMouseButtonDown(1))
+        {
+            placingConveyor = false;
+            placingFurnace = false;
+            placingSplitter = false;
+            placingItemOnConveyor = false;
+            ClearGhost();
+            if (itemGhost != null) Destroy(itemGhost);
+            itemGhost = null;
+            ClearSelection();
+        }
+    }
+
+    void HandleMouse()
+    {
+        var cell = MouseCell();
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            if (placingConveyor) { TryPlaceConveyor(cell.x, cell.y); }
+            else if (placingFurnace) { TryPlaceFurnace(cell.x, cell.y); }
+            else if (placingSplitter) { TryPlaceSplitter(cell.x, cell.y); }
+            else if (placingItemOnConveyor) { TryAssignItemToConveyor(cell.x, cell.y); }
             else
             {
-                CurrentItem.ItemObject.transform.position = placePosition;
+                SelectBuildingAt(cell.x, cell.y);
+                if (selected != null && selected.x == cell.x && selected.y == cell.y) dragging = true;
             }
         }
 
+        if (dragging && Input.GetMouseButton(0) && selected != null)
+        {
+            if ((selected.x != cell.x || selected.y != cell.y) && InBounds(cell.x, cell.y))
+            {
+                if (Buildings[cell.x, cell.y] == null)
+                {
+                    Buildings[selected.x, selected.y] = null;
+                    selected.x = cell.x; selected.y = cell.y;
+                    Buildings[cell.x, cell.y] = selected;
+                    selected.OnMoved();
+                }
+            }
+        }
 
-        
+        if (Input.GetMouseButtonUp(0)) dragging = false;
     }
 
-    public static bool FindNextBuilding(Conveyor conveyor, int xPos, int yPos)
+    // ==== Platzierung ====
+
+    void UpdateGhost(GameObject prefab)
     {
-        switch (conveyor.Rotation)
-        {
-            case 'N':
-                yPos++;
-                break;
-            case 'E':
-                xPos++;
-                break;
-            case 'S':
-                yPos--;
-                break;
-            case 'W':
-                xPos--;
-                break;
-        }
-
-        Building nextBuilding = Buildings[xPos, yPos];
-        if (nextBuilding is not null)
-        {
-            if (nextBuilding.CurrentItem is null)
-            {
-                nextBuilding.CurrentItem = conveyor.CurrentItem;
-                conveyor.CurrentItem = null;
-                return true;
-            }
-
-        }
-        return false;
+        var p = CellCenter(MouseCell().x, MouseCell().y);
+        if (ghost == null) ghost = Instantiate(prefab, p, Quaternion.identity);
+        ghost.transform.position = p;
     }
 
-    bool lockedGui = false;
-    bool toggleGui = false;
-    private void OnGUI()
+    void ClearGhost()
     {
-        if (toggleGui)
+        if (ghost != null) Destroy(ghost);
+        ghost = null;
+    }
+
+    void TryPlaceConveyor(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+
+        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
+        Dir d = AngleToDir(z);
+
+        GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, z));
+
+        Conveyor conv = new Conveyor();
+        conv.x = x; conv.y = y;
+        conv.rot = d;
+        conv.go = go;
+
+        Buildings[x, y] = conv;
+        conv.Init();
+    }
+
+    void TryPlaceFurnace(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+
+        GameObject go = Instantiate(furnacePrefab, CellCenter(x, y), Quaternion.identity);
+
+        Furnace f = new Furnace();
+        f.x = x; f.y = y;
+        f.rot = Dir.N;
+        f.go = go;
+        f.offSprite = furnaceOffSprite;
+        f.onSprite = furnaceOnSprite;
+
+        Buildings[x, y] = f;
+        f.OnMoved();
+    }
+
+    void TryPlaceSplitter(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+
+        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
+        Dir d = AngleToDir(z);
+
+        GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, z));
+
+        Splitter3 sp = new Splitter3();
+        sp.x = x; sp.y = y;
+        sp.rot = d;
+        sp.go = go;
+
+        Buildings[x, y] = sp;
+        sp.OnMoved();
+    }
+
+    void TryAssignItemToConveyor(int x, int y)
+    {
+        if (!InBounds(x, y)) return;
+
+        Conveyor c = Buildings[x, y] as Conveyor;
+        if (c == null) return;
+        if (!c.CanAccept(null)) return;
+
+        GameObject go = Instantiate(orePrefab, CellCenter(x, y), Quaternion.identity);
+        Vector3 p = go.transform.position; p.z = ITEM_Z;
+        go.transform.position = p;
+
+        SpriteRenderer sr = go.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.sortingOrder = 10;
+
+        Item it = new Item("Ore", go);
+        c.Accept(it);
+
+        placingItemOnConveyor = false;
+        if (itemGhost != null) Destroy(itemGhost);
+        itemGhost = null;
+    }
+
+    // ==== Auswahl / Bearbeitung ====
+
+    void SelectBuildingAt(int x, int y)
+    {
+        if (!InBounds(x, y)) { ClearSelection(); return; }
+
+        var b = Buildings[x, y];
+        if (b != null)
         {
-            GUI.Box(new Rect(10, 10, 300, 90), "joe");
-            if (GUI.Button(new Rect(20, 40, 80, 20), "Conveyor"))
+            if (selected == b) return;
+            ClearSelection();
+            selected = b;
+            ApplySelectionVisual(true);
+        }
+        else ClearSelection();
+    }
+
+    void ClearSelection()
+    {
+        if (selected != null) ApplySelectionVisual(false);
+        selected = null;
+    }
+
+    void ApplySelectionVisual(bool on)
+    {
+        if (selected == null || selected.go == null) return;
+        var sr = selected.go.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.color = on ? new Color(1f, 1f, 0.6f, 1f) : Color.white;
+    }
+
+    void DeleteSelected()
+    {
+        if (selected == null) return;
+
+        if (selected.item != null && selected.item.go != null)
+        {
+            Destroy(selected.item.go);
+            selected.item = null;
+        }
+
+        if (selected.go != null) Destroy(selected.go);
+
+        if (InBounds(selected.x, selected.y) && Buildings[selected.x, selected.y] == selected)
+            Buildings[selected.x, selected.y] = null;
+
+        selected = null;
+    }
+
+    // ==== Hilfen ====
+
+    public static bool InBounds(int x, int y)
+    {
+        return x >= 0 && x < GridSizeX && y >= 0 && y < GridSizeY;
+    }
+
+    (int x, int y) MouseCell()
+    {
+        var w = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        int cx = Mathf.FloorToInt(w.x / CELL_W);
+        int cy = Mathf.FloorToInt(w.y / CELL_H);
+        return (cx, cy);
+    }
+
+    Vector3 CellCenter(int x, int y)
+    {
+        return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0);
+    }
+
+    static Dir AngleToDir(float z)
+    {
+        int a = Mathf.RoundToInt(z) % 360;
+        if (a < 0) a += 360;
+        // 0° Sprite nach oben, 270° nach rechts
+        switch (a)
+        {
+            case 0: return Dir.N;
+            case 90: return Dir.W;
+            case 180: return Dir.S;
+            case 270: return Dir.E;
+            default: return Dir.N;
+        }
+    }
+
+    static float DirToAngle(Dir d)
+    {
+        switch (d)
+        {
+            case Dir.N: return 0f;
+            case Dir.E: return 270f;
+            case Dir.S: return 180f;
+            case Dir.W: return 90f;
+            default: return 0f;
+        }
+    }
+
+    static (int dx, int dy) StepForDir(Dir d)
+    {
+        switch (d)
+        {
+            case Dir.N: return (0, 1);
+            case Dir.E: return (1, 0);
+            case Dir.S: return (0, -1);
+            case Dir.W: return (-1, 0);
+            default: return (0, 0);
+        }
+    }
+
+    static Dir LeftOf(Dir d)
+    {
+        switch (d)
+        {
+            case Dir.N: return Dir.W;
+            case Dir.W: return Dir.S;
+            case Dir.S: return Dir.E;
+            case Dir.E: return Dir.N;
+            default: return Dir.N;
+        }
+    }
+
+    static Dir RightOf(Dir d)
+    {
+        switch (d)
+        {
+            case Dir.N: return Dir.E;
+            case Dir.E: return Dir.S;
+            case Dir.S: return Dir.W;
+            case Dir.W: return Dir.N;
+            default: return Dir.N;
+        }
+    }
+
+    // ==== Minimal-GUI ====
+
+    bool ToggleBuildMenu;
+
+    void OnGUI()
+    {
+        if (!ToggleBuildMenu) return;
+
+        GUI.Box(new Rect(10, 10, 260, 190), "Build");
+        if (GUI.Button(new Rect(20, 40, 90, 20), "Conveyor"))
+        {
+            placingConveyor = true;
+            placingFurnace = false;
+            placingSplitter = false;
+            placingItemOnConveyor = false;
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 40, 90, 20), "Furnace"))
+        {
+            placingFurnace = true;
+            placingConveyor = false;
+            placingSplitter = false;
+            placingItemOnConveyor = false;
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(20, 70, 90, 20), "Splitter 3"))
+        {
+            placingSplitter = true;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingItemOnConveyor = false;
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 70, 90, 20), "Debug Item"))
+        {
+            placingItemOnConveyor = true;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingSplitter = false;
+            ClearGhost();
+            ClearSelection();
+
+            if (itemGhost == null)
             {
-                isPlacingConveyor ^= true;
-                isDebugItemPlacing = false;
-            }
-            if (GUI.Button(new Rect(100, 40, 80, 20), "OrePlace"))
-            {
-                isDebugItemPlacing ^= true;
-                isPlacingConveyor = false;
+                itemGhost = Instantiate(orePrefab, Vector3.zero, Quaternion.identity);
+                Vector3 p = itemGhost.transform.position; p.z = ITEM_Z;
+                itemGhost.transform.position = p;
+                var sr = itemGhost.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10;
             }
         }
 
-        
-        if (Input.GetKeyDown(KeyCode.B))
-        {
-            Debug.Log("B pressed");
-            if (lockedGui == false)
-            {
-                Debug.Log(GUI.enabled);
-                lockedGui = true;
-                toggleGui ^= true;
-            }
-
-        }
-        else
-        {
-            lockedGui = false;
-        }
+        GUI.Label(new Rect(20, 100, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
+        GUI.Label(new Rect(20, 120, 220, 20), "Drag=Bewegen, Furnace rotiert nicht");
+        GUI.Label(new Rect(20, 140, 220, 20), "Splitter: L?F?R Round-Robin");
     }
 }
