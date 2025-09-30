@@ -43,7 +43,12 @@ public class Grid_Script : MonoBehaviour
     {
         public string id;
         public GameObject go;
-        public Item(string id, GameObject go) { this.id = id; this.go = go; }
+        public double value;
+        public Item(string id, GameObject go) 
+        { 
+            this.id = id; 
+            this.go = go; 
+        }
     }
 
     public class Building
@@ -53,13 +58,28 @@ public class Grid_Script : MonoBehaviour
         public int x, y;
         public GameObject go;
 
-        public virtual bool CanAccept(Item i) { return item == null; }
-        public virtual bool Accept(Item i) { if (!CanAccept(i)) return false; item = i; return true; }
+        public virtual bool CanAccept(Item i) 
+        { 
+            return item == null; 
+        }
+        public virtual bool Accept(Item i) 
+        { 
+            if (!CanAccept(i)) return false; item = i; return true; 
+        }
         public virtual void Tick(float dt) { }
-        public virtual void OnMoved() { if (go != null) go.transform.position = Center(); }
-        public virtual bool IsRotatable() { return false; }
+        public virtual void OnMoved() 
+        {
+            if (go != null) go.transform.position = Center(); 
+        }
+        public virtual bool IsRotatable()
+        { 
+            return false; 
+        }
         public virtual void RotateClockwise() { }
-        public Vector3 Center() { return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0); }
+        public Vector3 Center() 
+        { 
+            return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0);
+        }
     }
 
     public class Conveyor : Building
@@ -207,10 +227,16 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t >= processTime)
             {
-                if (item.go != null) UnityEngine.Object.Destroy(item.go);
+                item.value *= 2;
+                if (item.go != null)
+                {
+                    Destroy(item.go);
+                }
+
                 item = null;
                 t = 0f;
                 UpdateSprite();
+                
             }
         }
 
@@ -498,7 +524,11 @@ public class Grid_Script : MonoBehaviour
 
     void SelectBuildingAt(int x, int y)
     {
-        if (!InBounds(x, y)) { ClearSelection(); return; }
+        if (!InBounds(x, y)) 
+        { 
+            ClearSelection(); 
+            return; 
+        }
 
         var b = Buildings[x, y];
         if (b != null)
@@ -682,6 +712,6 @@ public class Grid_Script : MonoBehaviour
 
         GUI.Label(new Rect(20, 100, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
         GUI.Label(new Rect(20, 120, 220, 20), "Drag=Bewegen, Furnace rotiert nicht");
-        GUI.Label(new Rect(20, 140, 220, 20), "Splitter: L?F?R Round-Robin");
+        GUI.Label(new Rect(20, 140, 220, 20), "Splitter: L->F->R Round-Robin");
     }
 }
