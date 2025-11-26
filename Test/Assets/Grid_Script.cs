@@ -15,8 +15,10 @@ public class Grid_Script : MonoBehaviour
     // ==== Prefabs ====
     public GameObject conveyorPrefab;
     public GameObject orePrefab;
+    public GameObject ingotPrefab;
     public GameObject furnacePrefab;
     public GameObject splitter3Prefab;   // 3-Way-Splitter
+    public GameObject nodePrefab;
 
     // ==== Furnace Sprites ====
     public Sprite furnaceOffSprite;
@@ -36,19 +38,77 @@ public class Grid_Script : MonoBehaviour
     Building selected;
     bool dragging;
 
+    // ==== Ressourcen ====
+    ResourceNode[,] resourceNodes = new ResourceNode[GridSizeX, GridSizeY];
+
     // ==== Datentypen ====
     public enum Dir { N, E, S, W }
+
+    public enum MaterialType { Copper, Iron, Gold }
 
     public class Item
     {
         public string id;
         public GameObject go;
         public double value;
-        public Item(string id, GameObject go) 
-        { 
-            this.id = id; 
-            this.go = go; 
+        public MaterialType material;
+        public bool isIngot;
+        TextMesh valueLabel;
+
+        public Item(string id, GameObject go, MaterialType material, bool isIngot, double value)
+        {
+            this.id = id;
+            this.go = go;
+            this.material = material;
+            this.isIngot = isIngot;
+            this.value = value;
+            ApplyMaterialTint();
+            CreateValueLabel();
         }
+
+        void ApplyMaterialTint()
+        {
+            if (go == null) return;
+            var sr = go.GetComponent<SpriteRenderer>();
+            if (sr != null) sr.color = ColorForMaterial(material, isIngot);
+        }
+
+        void CreateValueLabel()
+        {
+            if (go == null) return;
+            var labelGo = new GameObject("ValueLabel");
+            labelGo.transform.SetParent(go.transform);
+            labelGo.transform.localPosition = new Vector3(0f, 0.35f, -0.05f);
+            var tm = labelGo.AddComponent<TextMesh>();
+            tm.text = $"{value:0}€";
+            tm.characterSize = 0.15f;
+            tm.fontSize = 64;
+            tm.alignment = TextAlignment.Center;
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.color = new Color(0.6f, 1f, 0.6f, 1f);
+            valueLabel = tm;
+        }
+
+        public void UpdateValue(double newValue)
+        {
+            value = newValue;
+            RefreshLabel();
+        }
+
+        public void RefreshLabel()
+        {
+            if (valueLabel != null)
+            {
+                valueLabel.text = $"{value:0}€";
+            }
+        }
+    }
+
+    public class ResourceNode
+    {
+        public MaterialType material;
+        public GameObject go;
+        public int x, y;
     }
 
     public class Building
@@ -227,16 +287,34 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t >= processTime)
             {
-                item.value *= 2;
+                var material = item.material;
+                double newValue = item.value + 1;
+
                 if (item.go != null)
                 {
                     Destroy(item.go);
                 }
 
-                item = null;
+                Item ingot = CreateItem(material, true, ingotPrefab, Center(), newValue);
+                bool delivered = TryDeliverItemForward(this, ingot);
+                if (!delivered)
+                {
+                    item = ingot;
+                    if (item.go != null)
+                    {
+                        Vector3 p = Center(); p.z = ITEM_Z;
+                        item.go.transform.position = p;
+                        var sr = item.go.GetComponent<SpriteRenderer>();
+                        if (sr != null) sr.sortingOrder = 10;
+                    }
+                }
+                else
+                {
+                    item = null;
+                }
                 t = 0f;
                 UpdateSprite();
-                
+
             }
         }
 
@@ -332,6 +410,11 @@ public class Grid_Script : MonoBehaviour
     }
 
     // ==== Unity ====
+
+    void Start()
+    {
+        SpawnResourceNodes(5);
+    }
 
     void Update()
     {
@@ -505,15 +588,9 @@ public class Grid_Script : MonoBehaviour
         if (c == null) return;
         if (!c.CanAccept(null)) return;
 
-        GameObject go = Instantiate(orePrefab, CellCenter(x, y), Quaternion.identity);
-        Vector3 p = go.transform.position; p.z = ITEM_Z;
-        go.transform.position = p;
-
-        SpriteRenderer sr = go.GetComponent<SpriteRenderer>();
-        if (sr != null) sr.sortingOrder = 10;
-
-        Item it = new Item("Ore", go);
-        c.Accept(it);
+        MaterialType mat = RandomMaterial();
+        Item it = CreateItem(mat, false, orePrefab, CellCenter(x, y));
+        if (it != null) c.Accept(it);
 
         placingItemOnConveyor = false;
         if (itemGhost != null) Destroy(itemGhost);
@@ -596,7 +673,7 @@ public class Grid_Script : MonoBehaviour
     {
         int a = Mathf.RoundToInt(z) % 360;
         if (a < 0) a += 360;
-        // 0� Sprite nach oben, 270� nach rechts
+        // 0° Sprite nach oben, 270° nach rechts
         switch (a)
         {
             case 0: return Dir.N;
@@ -655,12 +732,128 @@ public class Grid_Script : MonoBehaviour
         }
     }
 
+    void SpawnResourceNodes(int count)
+    {
+        int attempts = 0;
+        int placed = 0;
+        while (placed < count && attempts < count * 20)
+        {
+            attempts++;
+            int x = UnityEngine.Random.Range(1, GridSizeX - 1);
+            int y = UnityEngine.Random.Range(1, GridSizeY - 1);
+            if (resourceNodes[x, y] != null) continue;
+
+            var material = RandomMaterial();
+            var node = new ResourceNode { x = x, y = y, material = material };
+            resourceNodes[x, y] = node;
+            placed++;
+
+            if (nodePrefab != null)
+            {
+                GameObject go = Instantiate(nodePrefab, CellCenter(x, y), Quaternion.identity);
+                var sr = go.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.color = ColorForMaterial(material, false);
+                    sr.sortingOrder = 1;
+                }
+                node.go = go;
+            }
+        }
+    }
+
+    MaterialType RandomMaterial()
+    {
+        int roll = UnityEngine.Random.Range(0, 3);
+        switch (roll)
+        {
+            case 0: return MaterialType.Copper;
+            case 1: return MaterialType.Iron;
+            default: return MaterialType.Gold;
+        }
+    }
+
+    static double BaseValueForMaterial(MaterialType material)
+    {
+        switch (material)
+        {
+            case MaterialType.Copper: return 1;
+            case MaterialType.Iron: return 2;
+            case MaterialType.Gold: return 3;
+            default: return 1;
+        }
+    }
+
+    static Color ColorForMaterial(MaterialType material, bool isIngot)
+    {
+        Color c = Color.white;
+        switch (material)
+        {
+            case MaterialType.Copper: c = new Color(0.76f, 0.44f, 0.16f, 1f); break;
+            case MaterialType.Iron: c = new Color(0.7f, 0.72f, 0.75f, 1f); break;
+            case MaterialType.Gold: c = new Color(0.95f, 0.8f, 0.25f, 1f); break;
+        }
+        if (isIngot)
+        {
+            c = Color.Lerp(c, Color.white, 0.2f);
+        }
+        return c;
+    }
+
+    Item CreateItem(MaterialType material, bool isIngot, GameObject prefab, Vector3 position, double? overrideValue = null)
+    {
+        if (prefab == null) return null;
+        GameObject go = Instantiate(prefab, position, Quaternion.identity);
+        Vector3 p = go.transform.position; p.z = ITEM_Z;
+        go.transform.position = p;
+        var sr = go.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.sortingOrder = 10;
+        double val = overrideValue.HasValue ? overrideValue.Value : BaseValueForMaterial(material);
+        Item it = new Item(isIngot ? "Ingot" : "Ore", go, material, isIngot, val);
+        return it;
+    }
+
+    bool TryDeliverItemForward(Building from, Item output)
+    {
+        var step = StepForDir(from.rot);
+        int tx = from.x + step.dx;
+        int ty = from.y + step.dy;
+        if (!InBounds(tx, ty)) return false;
+        var nb = Buildings[tx, ty];
+        if (nb == null) return false;
+        if (!nb.CanAccept(output)) return false;
+        return nb.Accept(output);
+    }
+
+    double CalculateTotalItemValue()
+    {
+        double total = 0;
+        for (int x = 0; x < GridSizeX; x++)
+        {
+            for (int y = 0; y < GridSizeY; y++)
+            {
+                var b = Buildings[x, y];
+                if (b != null && b.item != null)
+                {
+                    total += b.item.value;
+                }
+            }
+        }
+        return total;
+    }
+
     // ==== Minimal-GUI ====
 
     bool ToggleBuildMenu;
 
     void OnGUI()
     {
+        GUIStyle moneyStyle = new GUIStyle(GUI.skin.label);
+        moneyStyle.normal.textColor = new Color(0.6f, 1f, 0.6f, 1f);
+        moneyStyle.fontSize = 16;
+        moneyStyle.alignment = TextAnchor.UpperRight;
+        GUI.Label(new Rect(Screen.width - 170, 10, 160, 25), $"Total: € {CalculateTotalItemValue():0}", moneyStyle);
+
         if (!ToggleBuildMenu) return;
 
         GUI.Box(new Rect(10, 10, 260, 190), "Build");
@@ -710,7 +903,7 @@ public class Grid_Script : MonoBehaviour
             }
         }
 
-        GUI.Label(new Rect(20, 100, 220, 20), "Klick=Auswahl, R=Rotieren, X=L�schen");
+        GUI.Label(new Rect(20, 100, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
         GUI.Label(new Rect(20, 120, 220, 20), "Drag=Bewegen, Furnace rotiert nicht");
         GUI.Label(new Rect(20, 140, 220, 20), "Splitter: L->F->R Round-Robin");
     }
