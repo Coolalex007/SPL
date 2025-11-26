@@ -20,6 +20,7 @@ public class Grid_Script : MonoBehaviour
     public GameObject splitter3Prefab;   // 3-Way-Splitter
     public GameObject minerPrefab;
     public GameObject nodePrefab;
+    public GameObject sellerPrefab;
 
     // ==== Furnace Sprites ====
     public Sprite furnaceOffSprite;
@@ -31,6 +32,7 @@ public class Grid_Script : MonoBehaviour
     bool placingFurnace;
     bool placingSplitter;
     bool placingMiner;
+    bool placingSeller;
 
     // ==== Debug-Item auf Conveyor setzen ====
     bool placingItemOnConveyor;
@@ -457,6 +459,24 @@ public class Grid_Script : MonoBehaviour
         }
     }
 
+    public class Seller : Building
+    {
+        public override bool Accept(Item i)
+        {
+            if (i == null) return false;
+            if (!base.Accept(i)) return false;
+
+            if (grid != null)
+            {
+                grid.AddMoney(i.value);
+            }
+
+            if (i.go != null) UnityEngine.Object.Destroy(i.go);
+            item = null;
+            return true;
+        }
+    }
+
     Node[,] nodes = new Node[GridSizeX, GridSizeY];
     float totalMoney;
 
@@ -476,6 +496,7 @@ public class Grid_Script : MonoBehaviour
         if (placingFurnace) UpdateGhost(furnacePrefab);
         if (placingSplitter) UpdateGhost(splitter3Prefab);
         if (placingMiner) UpdateGhost(minerPrefab);
+        if (placingSeller) UpdateGhost(sellerPrefab);
 
         if (placingItemOnConveyor && itemGhost != null)
         {
@@ -495,7 +516,6 @@ public class Grid_Script : MonoBehaviour
             }
         }
 
-        RecalculateTotalMoney();
     }
 
     void HandleHotkeys()
@@ -525,6 +545,7 @@ public class Grid_Script : MonoBehaviour
             placingFurnace = false;
             placingSplitter = false;
             placingMiner = false;
+            placingSeller = false;
             placingItemOnConveyor = false;
             ClearGhost();
             if (itemGhost != null) Destroy(itemGhost);
@@ -543,6 +564,7 @@ public class Grid_Script : MonoBehaviour
             if (placingFurnace) { TryPlaceFurnace(cell.x, cell.y); return; }
             if (placingSplitter) { TryPlaceSplitter(cell.x, cell.y); return; }
             if (placingMiner) { TryPlaceMiner(cell.x, cell.y); return; }
+            if (placingSeller) { TryPlaceSeller(cell.x, cell.y); return; }
             if (placingItemOnConveyor) { TryAssignItemToConveyor(cell.x, cell.y); return; }
 
             SelectBuildingAt(cell.x, cell.y);
@@ -634,6 +656,22 @@ public class Grid_Script : MonoBehaviour
 
         Buildings[x, y] = sp;
         sp.OnMoved();
+    }
+
+    void TryPlaceSeller(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+
+        GameObject go = Instantiate(sellerPrefab, CellCenter(x, y), Quaternion.identity);
+
+        Seller s = new Seller();
+        s.x = x; s.y = y;
+        s.rot = Dir.N;
+        s.go = go;
+        s.grid = this;
+
+        Buildings[x, y] = s;
+        s.OnMoved();
     }
 
     void TryPlaceMiner(int x, int y)
@@ -837,19 +875,11 @@ public class Grid_Script : MonoBehaviour
         sr.color = c;
     }
 
-    void RecalculateTotalMoney()
+    public void AddMoney(float amount)
     {
-        float sum = 0f;
-        for (int x = 0; x < GridSizeX; x++)
-        {
-            for (int y = 0; y < GridSizeY; y++)
-            {
-                var b = Buildings[x, y];
-                if (b != null && b.item != null) sum += b.item.value;
-            }
-        }
-        totalMoney = sum;
+        totalMoney += amount;
     }
+
 
     static Dir AngleToDir(float z)
     {
@@ -936,6 +966,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            placingSeller = false;
             ClearGhost();
             ClearSelection();
         }
@@ -946,6 +977,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            placingSeller = false;
             ClearGhost();
             ClearSelection();
         }
@@ -956,6 +988,7 @@ public class Grid_Script : MonoBehaviour
             placingFurnace = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            placingSeller = false;
             ClearGhost();
             ClearSelection();
         }
@@ -966,16 +999,31 @@ public class Grid_Script : MonoBehaviour
             placingFurnace = false;
             placingSplitter = false;
             placingItemOnConveyor = false;
+            placingSeller = false;
+            placingItemOnConveyor = false;
             ClearGhost();
             ClearSelection();
         }
-        if (GUI.Button(new Rect(20, 100, 90, 20), "Debug Item"))
+        if (GUI.Button(new Rect(20, 100, 90, 20), "Seller"))
+        {
+            placingSeller = true;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingItemOnConveyor = false;
+            ClearGhost();
+            ClearSelection();
+        }
+
+        if (GUI.Button(new Rect(120, 100, 90, 20), "Debug Item"))
         {
             placingItemOnConveyor = true;
             placingConveyor = false;
             placingFurnace = false;
             placingSplitter = false;
             placingMiner = false;
+            placingSeller = false;
             ClearGhost();
             ClearSelection();
 
