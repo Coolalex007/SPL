@@ -82,7 +82,7 @@ public class Grid_Script : MonoBehaviour
         public int x, y;
         public GameObject go;
         public Grid_Script grid;
-        
+
         public virtual bool CanAccept(Item i) { return item == null; }
         public virtual bool Accept(Item i) { if (!CanAccept(i)) return false; item = i; return true; }
         public virtual void Tick(float dt) { }
@@ -208,6 +208,13 @@ public class Grid_Script : MonoBehaviour
         public Sprite offSprite;
         public Sprite onSprite;
 
+        public override bool CanAccept(Item i)
+        {
+            if (i == null) return false;
+            if (i.isIngot) return false; // nur Erze schmelzen
+            return base.CanAccept(i);
+        }
+
         void UpdateSprite()
         {
             if (go == null) return;
@@ -237,13 +244,24 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t >= processTime)
             {
-                item.isIngot = true;
-                item.value += 1;
-                item.id = item.resource.ToString() + " Ingot";
-                if (grid != null)
+                Item ingot = grid != null ? grid.CreateItemFromResource(item.resource, true) : null;
+                if (item.go != null) UnityEngine.Object.Destroy(item.go);
+
+                if (ingot != null)
                 {
-                    grid.ColorizeItem(item);
-                    grid.UpdateItemValueLabel(item);
+                    ingot.go.transform.position = Center();
+                    item = ingot;
+                }
+                else
+                {
+                    item.isIngot = true;
+                    item.value += 1;
+                    item.id = item.resource.ToString() + " Ingot";
+                    if (grid != null)
+                    {
+                        grid.ColorizeItem(item);
+                        grid.UpdateItemValueLabel(item);
+                    }
                 }
                 AttemptOutput();
                 t = 0f;
@@ -783,6 +801,12 @@ public class Grid_Script : MonoBehaviour
         tm.alignment = TextAlignment.Center;
         tm.color = new Color(0.7f, 1f, 0.7f, 1f);
         tm.characterSize = 0.05f;
+        var mr = labelGo.GetComponent<MeshRenderer>();
+        if (mr != null)
+        {
+            mr.sortingOrder = 20;
+            mr.sortingLayerName = "Default";
+        }
         item.valueLabel = tm;
     }
 
