@@ -81,7 +81,8 @@ public class Grid_Script : MonoBehaviour
         public Dir rot;
         public int x, y;
         public GameObject go;
-
+        public Grid_Script grid;
+        
         public virtual bool CanAccept(Item i) { return item == null; }
         public virtual bool Accept(Item i) { if (!CanAccept(i)) return false; item = i; return true; }
         public virtual void Tick(float dt) { }
@@ -239,8 +240,11 @@ public class Grid_Script : MonoBehaviour
                 item.isIngot = true;
                 item.value += 1;
                 item.id = item.resource.ToString() + " Ingot";
-                ColorizeItem(item);
-                UpdateItemValueLabel(item);
+                if (grid != null)
+                {
+                    grid.ColorizeItem(item);
+                    grid.UpdateItemValueLabel(item);
+                }
                 AttemptOutput();
                 t = 0f;
                 UpdateSprite();
@@ -297,7 +301,8 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t < mineTime) return;
 
-            Item ore = CreateItemFromResource(node.resource, false);
+            Item ore = grid != null ? grid.CreateItemFromResource(node.resource, false) : null;
+            if (ore == null) return;
             ore.go.transform.position = Center();
             item = ore;
             TryOutput();
@@ -571,6 +576,7 @@ public class Grid_Script : MonoBehaviour
         conv.x = x; conv.y = y;
         conv.rot = d;
         conv.go = go;
+        conv.grid = this;
 
         Buildings[x, y] = conv;
         conv.Init();
@@ -588,6 +594,7 @@ public class Grid_Script : MonoBehaviour
         f.go = go;
         f.offSprite = furnaceOffSprite;
         f.onSprite = furnaceOnSprite;
+        f.grid = this;
 
         Buildings[x, y] = f;
         f.OnMoved();
@@ -626,6 +633,7 @@ public class Grid_Script : MonoBehaviour
         m.rot = d;
         m.go = go;
         m.node = nodes[x, y];
+        m.grid = this;
 
         Buildings[x, y] = m;
         m.OnMoved();
