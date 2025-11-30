@@ -1100,26 +1100,28 @@ public class Grid_Script : MonoBehaviour
             {
                 arrow = new GameObject("DirectionArrow");
                 arrow.transform.SetParent(parent);
-                var lr = arrow.AddComponent<LineRenderer>();
-                lr.useWorldSpace = false;
-                lr.material = new Material(Shader.Find("Sprites/Default"));
-                lr.startWidth = 0.05f;
-                lr.endWidth = 0.05f;
-                lr.startColor = Color.red;
-                lr.endColor = Color.red;
-                lr.sortingOrder = 20;
-                lr.positionCount = 4;
-                lr.textureMode = LineTextureMode.DistributePerSegment;
             }
+
             arrow.transform.SetParent(parent);
-            var lr = arrow.GetComponent<LineRenderer>();
-            if (lr != null)
+            var lineRenderer = arrow.GetComponent<LineRenderer>();
+            if (lineRenderer == null)
             {
-                lr.SetPosition(0, new Vector3(0f, 0.18f, 0f));
-                lr.SetPosition(1, new Vector3(0.12f, -0.02f, 0f));
-                lr.SetPosition(2, new Vector3(0f, 0.06f, 0f));
-                lr.SetPosition(3, new Vector3(-0.12f, -0.02f, 0f));
+                lineRenderer = arrow.AddComponent<LineRenderer>();
+                lineRenderer.useWorldSpace = false;
+                lineRenderer.material = new Material(Shader.Find("Sprites/Default"));
+                lineRenderer.startWidth = 0.05f;
+                lineRenderer.endWidth = 0.05f;
+                lineRenderer.startColor = Color.red;
+                lineRenderer.endColor = Color.red;
+                lineRenderer.sortingOrder = 20;
+                lineRenderer.positionCount = 4;
+                lineRenderer.textureMode = LineTextureMode.DistributePerSegment;
             }
+
+            lineRenderer.SetPosition(0, new Vector3(0f, 0.18f, 0f));
+            lineRenderer.SetPosition(1, new Vector3(0.12f, -0.02f, 0f));
+            lineRenderer.SetPosition(2, new Vector3(0f, 0.06f, 0f));
+            lineRenderer.SetPosition(3, new Vector3(-0.12f, -0.02f, 0f));
         }
 
         arrow.transform.localPosition = new Vector3(0f, 0f, -0.05f);
