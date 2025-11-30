@@ -374,6 +374,12 @@ public class Grid_Script : MonoBehaviour
         {
             if (item == null) return;
 
+            if (item.form != ItemForm.Ingot)
+            {
+                AttemptOutput();
+                return;
+            }
+
             t += dt;
             if (t >= processTime)
             {
