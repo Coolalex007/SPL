@@ -22,22 +22,23 @@ public class Grid_Script : MonoBehaviour
     public GameObject minerPrefab;
     public GameObject nodePrefab;
     public GameObject sellerPrefab;
+    public GameObject platePrefab;
     public GameObject directionArrowPrefab;
 
     // ==== Furnace Sprites ====
     public Sprite furnaceOffSprite;
     public Sprite furnaceOnSprite;
-    public Sprite forgeOffSprite;
-    public Sprite forgeOnSprite;
 
     // ==== Platzierung ====
     GameObject ghost;
+    GameObject ghostDirectionArrow;
     bool placingConveyor;
     bool placingFurnace;
     bool placingSplitter;
     bool placingMiner;
     bool placingSeller;
     bool placingForge;
+    Dir placementDir = Dir.N;
 
     // ==== Debug-Item auf Conveyor setzen ====
     bool placingItemOnConveyor;
@@ -340,22 +341,12 @@ public class Grid_Script : MonoBehaviour
     {
         public float processTime = 2f;
         float t;
-        public Sprite offSprite;
-        public Sprite onSprite;
 
         public override bool CanAccept(Item i)
         {
             if (i == null) return false;
             if (i.form != ItemForm.Ingot) return false; // nur Barren annehmen
             return base.CanAccept(i);
-        }
-
-        void UpdateSprite()
-        {
-            if (go == null) return;
-            var sr = go.GetComponent<SpriteRenderer>();
-            if (sr == null) return;
-            sr.sprite = (item != null) ? onSprite : offSprite;
         }
 
         void UpdateDirection()
@@ -368,7 +359,6 @@ public class Grid_Script : MonoBehaviour
         {
             if (!base.Accept(i)) return false;
             t = 0f;
-            UpdateSprite();
             if (i.go != null)
             {
                 Vector3 p = Center(); p.z = ITEM_Z;
@@ -392,13 +382,19 @@ public class Grid_Script : MonoBehaviour
 
                 if (plate != null)
                 {
+                    plate.value = item.value + 2;
+                    plate.id = item.resource.ToString() + " Plate";
+                    if (grid != null)
+                    {
+                        grid.UpdateItemValueLabel(plate);
+                    }
                     plate.go.transform.position = Center();
                     item = plate;
                 }
                 else
                 {
                     item.form = ItemForm.Plate;
-                    item.value += 1;
+                    item.value += 2;
                     item.id = item.resource.ToString() + " Plate";
                     if (grid != null)
                     {
@@ -409,7 +405,6 @@ public class Grid_Script : MonoBehaviour
 
                 AttemptOutput();
                 t = 0f;
-                UpdateSprite();
             }
         }
 
@@ -438,7 +433,6 @@ public class Grid_Script : MonoBehaviour
         public override void OnMoved()
         {
             base.OnMoved();
-            UpdateSprite();
             UpdateDirection();
         }
 
@@ -695,9 +689,9 @@ public class Grid_Script : MonoBehaviour
             {
                 selected.RotateClockwise();
             }
-            else if (ghost != null && (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingForge))
+            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingForge)
             {
-                ghost.transform.Rotate(0, 0, -90);
+                RotatePlacementDirection();
             }
         }
 
@@ -715,6 +709,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingSeller = false;
             placingItemOnConveyor = false;
+            ResetPlacementDirection();
             ClearGhost();
             if (itemGhost != null) Destroy(itemGhost);
             itemGhost = null;
@@ -764,22 +759,71 @@ public class Grid_Script : MonoBehaviour
         var p = CellCenter(MouseCell().x, MouseCell().y);
         if (ghost == null) ghost = Instantiate(prefab, p, Quaternion.identity);
         ghost.transform.position = p;
+
+        if (placingConveyor || placingSplitter)
+        {
+            ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
+            ClearGhostDirectionArrow();
+        }
+        else if (placingFurnace || placingMiner || placingForge)
+        {
+            ghost.transform.rotation = Quaternion.identity;
+            UpdateGhostDirectionArrow();
+        }
+        else
+        {
+            ClearGhostDirectionArrow();
+        }
     }
 
     void ClearGhost()
     {
         if (ghost != null) Destroy(ghost);
         ghost = null;
+        ClearGhostDirectionArrow();
+    }
+
+    void ClearGhostDirectionArrow()
+    {
+        if (ghostDirectionArrow != null) Destroy(ghostDirectionArrow);
+        ghostDirectionArrow = null;
+    }
+
+    void UpdateGhostDirectionArrow()
+    {
+        if (ghost == null) return;
+        UpdateDirectionArrow(ref ghostDirectionArrow, ghost.transform, placementDir);
+    }
+
+    void RotatePlacementDirection()
+    {
+        placementDir = RightOf(placementDir);
+
+        if (ghost != null)
+        {
+            if (placingConveyor || placingSplitter)
+            {
+                ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
+            }
+            else if (placingFurnace || placingMiner || placingForge)
+            {
+                UpdateGhostDirectionArrow();
+            }
+        }
+    }
+
+    void ResetPlacementDirection()
+    {
+        placementDir = Dir.N;
     }
 
     void TryPlaceConveyor(int x, int y)
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
 
-        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
-        Dir d = AngleToDir(z);
+        Dir d = placementDir;
 
-        GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, z));
+        GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
 
         Conveyor conv = new Conveyor();
         conv.x = x; conv.y = y;
@@ -796,8 +840,7 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (furnacePrefab == null) return;
 
-        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
-        Dir d = AngleToDir(z);
+        Dir d = placementDir;
 
         GameObject go = Instantiate(furnacePrefab, CellCenter(x, y), Quaternion.identity);
 
@@ -818,8 +861,7 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (forgePrefab == null) return;
 
-        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
-        Dir d = AngleToDir(z);
+        Dir d = placementDir;
 
         GameObject go = Instantiate(forgePrefab, CellCenter(x, y), Quaternion.identity);
 
@@ -827,8 +869,6 @@ public class Grid_Script : MonoBehaviour
         f.x = x; f.y = y;
         f.rot = d;
         f.go = go;
-        f.offSprite = forgeOffSprite != null ? forgeOffSprite : furnaceOffSprite;
-        f.onSprite = forgeOnSprite != null ? forgeOnSprite : furnaceOnSprite;
         f.grid = this;
 
         Buildings[x, y] = f;
@@ -839,10 +879,9 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
 
-        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
-        Dir d = AngleToDir(z);
+        Dir d = placementDir;
 
-        GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, z));
+        GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
 
         Splitter3 sp = new Splitter3();
         sp.x = x; sp.y = y;
@@ -874,10 +913,9 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (nodes[x, y] == null) return;
 
-        float z = ghost != null ? ghost.transform.eulerAngles.z : 0f;
-        Dir d = AngleToDir(z);
+        Dir d = placementDir;
 
-        GameObject go = Instantiate(minerPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, z));
+        GameObject go = Instantiate(minerPrefab, CellCenter(x, y), Quaternion.identity);
 
         Miner m = new Miner();
         m.x = x; m.y = y;
@@ -1005,7 +1043,7 @@ public class Grid_Script : MonoBehaviour
 
     Item CreateItemFromResource(ResourceType res, ItemForm form)
     {
-        GameObject prefab = form == ItemForm.Ore ? orePrefab : ingotPrefab;
+        GameObject prefab = form == ItemForm.Ore ? orePrefab : (form == ItemForm.Ingot ? ingotPrefab : platePrefab ?? ingotPrefab);
         if (prefab == null) return null;
         GameObject go = Instantiate(prefab, Vector3.zero, Quaternion.identity);
         Vector3 p = go.transform.position; p.z = ITEM_Z;
@@ -1015,7 +1053,7 @@ public class Grid_Script : MonoBehaviour
         if (sr != null) sr.sortingOrder = 10;
 
         int baseValue = res == ResourceType.Copper ? 1 : (res == ResourceType.Iron ? 2 : 3);
-        int value = baseValue + (form == ItemForm.Ingot ? 1 : form == ItemForm.Plate ? 2 : 0);
+        int value = baseValue + (form == ItemForm.Ingot ? 1 : form == ItemForm.Plate ? 3 : 0);
         string suffix = form == ItemForm.Ore ? " Ore" : (form == ItemForm.Ingot ? " Ingot" : " Plate");
         Item item = new Item(res.ToString() + suffix, res, value, form, go);
         ColorizeItem(item);
@@ -1222,6 +1260,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
@@ -1234,6 +1273,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
@@ -1246,6 +1286,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
@@ -1258,6 +1299,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
@@ -1271,6 +1313,7 @@ public class Grid_Script : MonoBehaviour
             placingItemOnConveyor = false;
             placingSeller = false;
             placingItemOnConveyor = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
@@ -1283,6 +1326,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
