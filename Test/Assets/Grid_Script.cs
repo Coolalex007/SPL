@@ -868,6 +868,11 @@ public class Grid_Script : MonoBehaviour
     {
         List<Item> inputs = new List<Item>();
 
+        const int MaxBoltInputs = 2;
+        const int MaxPlateInputs = 1;
+        // Allow one extra plate as a safety buffer so plates on the belt don't block bolts.
+        const int MaxPlateBuffer = MaxPlateInputs + 1;
+
         void UpdateDirection()
         {
             if (grid == null || go == null) return;
@@ -880,8 +885,8 @@ public class Grid_Script : MonoBehaviour
             if (item != null) return false; // Output slot occupied
             if (i.form != ItemForm.Bolt && i.form != ItemForm.Plate) return false;
             var (bolts, plates) = InputCounts();
-            if (i.form == ItemForm.Bolt && bolts >= 2) return false;
-            if (i.form == ItemForm.Plate && plates >= 1) return false;
+            if (i.form == ItemForm.Bolt && bolts >= MaxBoltInputs) return false;
+            if (i.form == ItemForm.Plate && plates >= MaxPlateBuffer) return false;
             if (inputs.Count > 0)
             {
                 var first = inputs[0];
@@ -922,7 +927,7 @@ public class Grid_Script : MonoBehaviour
                 else if (it.form == ItemForm.Plate) plateCount++;
             }
 
-            if (boltCount < 2 || plateCount < 1) return;
+            if (boltCount < MaxBoltInputs || plateCount < MaxPlateInputs) return;
 
             if (inputs.Count == 0) return;
             ResourceType res = inputs[0].resource;
