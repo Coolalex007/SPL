@@ -40,6 +40,7 @@ public class Grid_Script : MonoBehaviour
     // ==== Platzierung ====
     GameObject ghost;
     GameObject ghostDirectionArrow;
+    GameObject ghostCostLabel;
     bool placingConveyor;
     bool placingFurnace;
     bool placingSplitter;
@@ -1065,12 +1066,25 @@ public class Grid_Script : MonoBehaviour
     }
 
     Node[,] nodes = new Node[GridSizeX, GridSizeY];
+
+    [Header("Economy")]
+    public float startingMoney = 200f;
+    public float conveyorCost = 5f;
+    public float furnaceCost = 50f;
+    public float forgeCost = 80f;
+    public float alloyFurnaceCost = 100f;
+    public float splitterCost = 30f;
+    public float minerCost = 60f;
+    public float sellerCost = 40f;
+    public float craftingTableCost = 90f;
+
     float totalMoney;
 
     // ==== Unity ====
 
     void Start()
     {
+        totalMoney = startingMoney;
         GenerateResourceNodes(5);
     }
 
@@ -1195,11 +1209,27 @@ public class Grid_Script : MonoBehaviour
 
     // ==== Platzierung ====
 
+    float CurrentPlacementCost()
+    {
+        if (placingConveyor) return conveyorCost;
+        if (placingFurnace) return furnaceCost;
+        if (placingAlloyFurnace) return alloyFurnaceCost;
+        if (placingForge) return forgeCost;
+        if (placingSplitter) return splitterCost;
+        if (placingMiner) return minerCost;
+        if (placingSeller) return sellerCost;
+        if (placingCraftingTable) return craftingTableCost;
+        return 0f;
+    }
+
     void UpdateGhost(GameObject prefab)
     {
         var p = CellCenter(MouseCell().x, MouseCell().y);
         if (ghost == null) ghost = Instantiate(prefab, p, Quaternion.identity);
         ghost.transform.position = p;
+
+        float cost = CurrentPlacementCost();
+        UpdateGhostCostLabel(cost);
 
         if (placingConveyor || placingSplitter)
         {
@@ -1222,6 +1252,8 @@ public class Grid_Script : MonoBehaviour
         if (ghost != null) Destroy(ghost);
         ghost = null;
         ClearGhostDirectionArrow();
+        if (ghostCostLabel != null) Destroy(ghostCostLabel);
+        ghostCostLabel = null;
     }
 
     void ClearGhostDirectionArrow()
@@ -1234,6 +1266,39 @@ public class Grid_Script : MonoBehaviour
     {
         if (ghost == null) return;
         UpdateDirectionArrow(ref ghostDirectionArrow, ghost.transform, placementDir);
+    }
+
+    void UpdateGhostCostLabel(float cost)
+    {
+        if (ghost == null) return;
+
+        if (cost <= 0f)
+        {
+            if (ghostCostLabel != null) Destroy(ghostCostLabel);
+            ghostCostLabel = null;
+            return;
+        }
+
+        if (ghostCostLabel == null)
+        {
+            ghostCostLabel = new GameObject("CostLabel");
+            ghostCostLabel.transform.SetParent(ghost.transform);
+            ghostCostLabel.transform.localPosition = new Vector3(0f, 0.6f, -0.05f);
+            var tm = ghostCostLabel.AddComponent<TextMesh>();
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.alignment = TextAlignment.Center;
+            tm.fontSize = 48;
+            tm.color = Color.yellow;
+
+            var renderer = ghostCostLabel.GetComponent<MeshRenderer>();
+            if (renderer != null) renderer.sortingOrder = 100;
+        }
+
+        var textMesh = ghostCostLabel.GetComponent<TextMesh>();
+        if (textMesh != null)
+        {
+            textMesh.text = "€" + cost.ToString("F0");
+        }
     }
 
     void RotatePlacementDirection()
@@ -1262,6 +1327,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
 
+        if (!TrySpendMoney(conveyorCost)) return;
+
         Dir d = placementDir;
 
         GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
@@ -1280,6 +1347,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (furnacePrefab == null) return;
+
+        if (!TrySpendMoney(furnaceCost)) return;
 
         Dir d = placementDir;
 
@@ -1302,6 +1371,8 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (alloyFurnacePrefab == null && furnacePrefab == null) return;
 
+        if (!TrySpendMoney(alloyFurnaceCost)) return;
+
         Dir d = placementDir;
 
         GameObject prefab = alloyFurnacePrefab != null ? alloyFurnacePrefab : furnacePrefab;
@@ -1322,6 +1393,8 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (forgePrefab == null) return;
 
+        if (!TrySpendMoney(forgeCost)) return;
+
         Dir d = placementDir;
 
         GameObject go = Instantiate(forgePrefab, CellCenter(x, y), Quaternion.identity);
@@ -1341,6 +1414,8 @@ public class Grid_Script : MonoBehaviour
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (craftingTablePrefab == null) return;
 
+        if (!TrySpendMoney(craftingTableCost)) return;
+
         Dir d = placementDir;
 
         GameObject go = Instantiate(craftingTablePrefab, CellCenter(x, y), Quaternion.identity);
@@ -1359,6 +1434,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
 
+        if (!TrySpendMoney(splitterCost)) return;
+
         Dir d = placementDir;
 
         GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
@@ -1376,6 +1453,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
 
+        if (!TrySpendMoney(sellerCost)) return;
+
         GameObject go = Instantiate(sellerPrefab, CellCenter(x, y), Quaternion.identity);
 
         Seller s = new Seller();
@@ -1392,6 +1471,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (!InBounds(x, y) || Buildings[x, y] != null) return;
         if (nodes[x, y] == null) return;
+
+        if (!TrySpendMoney(minerCost)) return;
 
         Dir d = placementDir;
 
@@ -1793,6 +1874,18 @@ public class Grid_Script : MonoBehaviour
         totalMoney += amount;
     }
 
+    bool CanAfford(float amount)
+    {
+        return totalMoney >= amount;
+    }
+
+    bool TrySpendMoney(float amount)
+    {
+        if (!CanAfford(amount)) return false;
+        totalMoney -= amount;
+        return true;
+    }
+
     void DrawRecipeButton(Rect rect, string label, bool active, Action onClick)
     {
         Color prev = GUI.color;
@@ -1922,7 +2015,7 @@ public class Grid_Script : MonoBehaviour
 
         if (!ToggleBuildMenu) return;
 
-        GUI.Box(new Rect(10, 10, 260, 280), "Build");
+        GUI.Box(new Rect(10, 10, 260, 310), "Build");
         if (GUI.Button(new Rect(20, 40, 90, 20), "Conveyor"))
         {
             placingConveyor = true;
@@ -2068,6 +2161,10 @@ public class Grid_Script : MonoBehaviour
                 if (sr != null) sr.sortingOrder = 10;
             }
         }
+
+        float selectedCost = CurrentPlacementCost();
+        string costLabel = selectedCost > 0f ? "Kosten: € " + selectedCost.ToString("F0") : "Kosten: -";
+        GUI.Label(new Rect(20, 280, 220, 20), costLabel);
 
         GUI.Label(new Rect(20, 190, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
         GUI.Label(new Rect(20, 210, 220, 20), "Drag=Bewegen, Pfeil=Ausgaberichtung");
