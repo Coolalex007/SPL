@@ -680,8 +680,11 @@ public class Grid_Script : MonoBehaviour
         {
             if (i == null) return false;
             if (item != null) return false; // Output slot occupied
-            if (inputs.Count >= 3) return false;
             if (i.form != ItemForm.Bolt && i.form != ItemForm.Plate) return false;
+            var (bolts, plates) = InputCounts();
+            if (i.form == ItemForm.Bolt && bolts >= 2) return false;
+            if (i.form == ItemForm.Plate && plates >= 1) return false;
+            if (inputs.Count > 0 && inputs[0].resource != i.resource) return false;
             return true;
         }
 
@@ -787,6 +790,24 @@ public class Grid_Script : MonoBehaviour
                 else if (it.form == ItemForm.Plate) plates++;
             }
             return (bolts, plates);
+        }
+
+        public void ClearContents()
+        {
+            if (item != null && item.go != null)
+            {
+                UnityEngine.Object.Destroy(item.go);
+            }
+            item = null;
+
+            foreach (var it in inputs)
+            {
+                if (it != null && it.go != null)
+                {
+                    UnityEngine.Object.Destroy(it.go);
+                }
+            }
+            inputs.Clear();
         }
 
         void ConsumeItem(Item it)
@@ -1220,7 +1241,11 @@ public class Grid_Script : MonoBehaviour
     {
         if (selected == null) return;
 
-        if (selected.item != null && selected.item.go != null)
+        if (selected is CraftingTable crafting)
+        {
+            crafting.ClearContents();
+        }
+        else if (selected.item != null && selected.item.go != null)
         {
             Destroy(selected.item.go);
             selected.item = null;
