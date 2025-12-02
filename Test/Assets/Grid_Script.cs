@@ -1668,8 +1668,6 @@ public class Grid_Script : MonoBehaviour
         Sprite rightSprite = CreateHalfSprite(sprite, false);
         if (leftSprite == null || rightSprite == null) return;
 
-        float halfOffset = sprite.bounds.extents.x * 0.5f;
-
         Transform left = item.go.transform.Find("AlloyHalfA");
         if (left == null)
         {
@@ -1683,7 +1681,7 @@ public class Grid_Script : MonoBehaviour
         leftSr.color = primaryColor;
         leftSr.sortingOrder = sortingOrder;
         leftSr.sortingLayerID = sortingLayerId;
-        left.localPosition = new Vector3(-halfOffset, 0f, 0f);
+        left.localPosition = Vector3.zero;
         left.localScale = Vector3.one;
 
         Transform right = item.go.transform.Find("AlloyHalfB");
@@ -1699,7 +1697,7 @@ public class Grid_Script : MonoBehaviour
         rightSr.color = secondaryColor;
         rightSr.sortingOrder = sortingOrder;
         rightSr.sortingLayerID = sortingLayerId;
-        right.localPosition = new Vector3(halfOffset, 0f, 0f);
+        right.localPosition = Vector3.zero;
         right.localScale = Vector3.one;
     }
 
