@@ -19,6 +19,7 @@ public class Grid_Script : MonoBehaviour
     public GameObject ingotPrefab;
     public GameObject furnacePrefab;
     public GameObject forgePrefab;
+    public GameObject alloyFurnacePrefab;
     public GameObject splitter3Prefab;   // 3-Way-Splitter
     public GameObject minerPrefab;
     public GameObject nodePrefab;
@@ -42,6 +43,7 @@ public class Grid_Script : MonoBehaviour
     bool placingMiner;
     bool placingSeller;
     bool placingForge;
+    bool placingAlloyFurnace;
     bool placingCraftingTable;
     Dir placementDir = Dir.N;
 
@@ -77,10 +79,12 @@ public class Grid_Script : MonoBehaviour
     {
         public string id;
         public ResourceType resource;
+        public ResourceType? secondaryResource;
         public int value;
         public ItemForm form;
         public GameObject go;
         public TextMesh valueLabel;
+        public bool isAlloy;
 
         public Item(string id, ResourceType resource, int value, ItemForm form, GameObject go)
         {
@@ -340,6 +344,177 @@ public class Grid_Script : MonoBehaviour
                 case Dir.E: rot = Dir.S; break;
                 case Dir.S: rot = Dir.W; break;
                 case Dir.W: rot = Dir.N; break;
+            }
+            UpdateDirection();
+        }
+    }
+
+    public class AlloyFurnace : Building
+    {
+        public float processTime = 2f;
+        float t;
+        List<Item> inputs = new List<Item>();
+
+        void UpdateDirection()
+        {
+            if (grid == null || go == null) return;
+            grid.UpdateDirectionArrow(ref directionArrow, go.transform, rot);
+        }
+
+        public override bool CanAccept(Item i)
+        {
+            if (i == null) return false;
+            if (item != null) return false; // output slot occupied
+            if (inputs.Count >= 2) return false;
+            if (i.form != ItemForm.Ingot) return false;
+            if (i.isAlloy) return false; // prevent re-alloying
+            return true;
+        }
+
+        public override bool Accept(Item i)
+        {
+            if (!CanAccept(i)) return false;
+            inputs.Add(i);
+            RepositionInputs();
+            UpdateDirection();
+            return true;
+        }
+
+        public override void Tick(float dt)
+        {
+            if (item != null)
+            {
+                AttemptOutput();
+                return;
+            }
+
+            if (inputs.Count < 2) return;
+
+            t += dt;
+            if (t >= processTime)
+            {
+                ProcessAlloy();
+                t = 0f;
+            }
+        }
+
+        void ProcessAlloy()
+        {
+            if (inputs.Count < 2) return;
+
+            Item first = inputs[0];
+            Item second = inputs[1];
+            inputs.Clear();
+
+            int combinedValue = first.value + second.value;
+            ResourceType primary = first.resource;
+            ResourceType secondary = second.resource;
+
+            ConsumeItem(first);
+            ConsumeItem(second);
+
+            Item alloy = grid != null ? grid.CreateAlloyItem(primary, secondary, combinedValue) : null;
+            if (alloy != null)
+            {
+                alloy.go.transform.position = Center();
+                item = alloy;
+            }
+            else
+            {
+                GameObject go = new GameObject("Alloy");
+                go.transform.position = Center();
+                Item fallback = new Item(primary.ToString() + "-" + secondary.ToString() + " Alloy", primary, combinedValue, ItemForm.Ingot, go);
+                fallback.isAlloy = true;
+                fallback.secondaryResource = secondary;
+                item = fallback;
+                if (grid != null)
+                {
+                    grid.ColorizeItem(item);
+                    grid.CreateItemValueLabel(item);
+                    grid.UpdateItemValueLabel(item);
+                }
+            }
+
+            AttemptOutput();
+            RepositionInputs();
+        }
+
+        void ConsumeItem(Item it)
+        {
+            if (it == null) return;
+            if (it.go != null) UnityEngine.Object.Destroy(it.go);
+        }
+
+        void AttemptOutput()
+        {
+            if (item == null) return;
+
+            var step = StepForDir(rot);
+            int tx = x + step.dx;
+            int ty = y + step.dy;
+            if (!InBounds(tx, ty)) return;
+
+            var nb = Buildings[tx, ty];
+            if (nb != null && nb.CanAccept(item))
+            {
+                nb.Accept(item);
+                item = null;
+            }
+            else if (item != null && item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
+            }
+        }
+
+        void RepositionInputs()
+        {
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (inputs[i].go == null) continue;
+                Vector3 p = Center();
+                p.z = ITEM_Z;
+                p.x += (i - 0.5f) * 0.12f;
+                inputs[i].go.transform.position = p;
+                var sr = inputs[i].go.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10 + i;
+            }
+        }
+
+        public void ClearContents()
+        {
+            if (item != null && item.go != null) UnityEngine.Object.Destroy(item.go);
+            item = null;
+
+            foreach (var input in inputs)
+            {
+                if (input != null && input.go != null) UnityEngine.Object.Destroy(input.go);
+            }
+            inputs.Clear();
+        }
+
+        public override bool IsRotatable() { return true; }
+
+        public override void RotateClockwise()
+        {
+            switch (rot)
+            {
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
+            }
+            UpdateDirection();
+        }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            RepositionInputs();
+            if (item != null && item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
             }
             UpdateDirection();
         }
@@ -884,6 +1059,7 @@ public class Grid_Script : MonoBehaviour
 
         if (placingConveyor) UpdateGhost(conveyorPrefab);
         if (placingFurnace) UpdateGhost(furnacePrefab);
+        if (placingAlloyFurnace && (alloyFurnacePrefab != null || furnacePrefab != null)) UpdateGhost(alloyFurnacePrefab ?? furnacePrefab);
         if (placingSplitter) UpdateGhost(splitter3Prefab);
         if (placingMiner) UpdateGhost(minerPrefab);
         if (placingSeller) UpdateGhost(sellerPrefab);
@@ -920,7 +1096,7 @@ public class Grid_Script : MonoBehaviour
             {
                 selected.RotateClockwise();
             }
-            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingForge || placingCraftingTable)
+            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingAlloyFurnace || placingForge || placingCraftingTable)
             {
                 RotatePlacementDirection();
             }
@@ -939,6 +1115,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingSeller = false;
+            placingAlloyFurnace = false;
             placingCraftingTable = false;
             placingItemOnConveyor = false;
             ResetPlacementDirection();
@@ -965,6 +1142,7 @@ public class Grid_Script : MonoBehaviour
         {
             if (placingConveyor) { TryPlaceConveyor(cell.x, cell.y); return; }
             if (placingFurnace) { TryPlaceFurnace(cell.x, cell.y); return; }
+            if (placingAlloyFurnace) { TryPlaceAlloyFurnace(cell.x, cell.y); return; }
             if (placingForge) { TryPlaceForge(cell.x, cell.y); return; }
             if (placingSplitter) { TryPlaceSplitter(cell.x, cell.y); return; }
             if (placingMiner) { TryPlaceMiner(cell.x, cell.y); return; }
@@ -1006,7 +1184,7 @@ public class Grid_Script : MonoBehaviour
             ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             ClearGhostDirectionArrow();
         }
-        else if (placingFurnace || placingMiner || placingForge || placingCraftingTable)
+        else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable)
         {
             ghost.transform.rotation = Quaternion.identity;
             UpdateGhostDirectionArrow();
@@ -1046,7 +1224,7 @@ public class Grid_Script : MonoBehaviour
             {
                 ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             }
-            else if (placingFurnace || placingMiner || placingForge || placingCraftingTable)
+            else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable)
             {
                 UpdateGhostDirectionArrow();
             }
@@ -1091,6 +1269,26 @@ public class Grid_Script : MonoBehaviour
         f.go = go;
         f.offSprite = furnaceOffSprite;
         f.onSprite = furnaceOnSprite;
+        f.grid = this;
+
+        Buildings[x, y] = f;
+        f.OnMoved();
+    }
+
+    void TryPlaceAlloyFurnace(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (alloyFurnacePrefab == null && furnacePrefab == null) return;
+
+        Dir d = placementDir;
+
+        GameObject prefab = alloyFurnacePrefab != null ? alloyFurnacePrefab : furnacePrefab;
+        GameObject go = Instantiate(prefab, CellCenter(x, y), Quaternion.identity);
+
+        AlloyFurnace f = new AlloyFurnace();
+        f.x = x; f.y = y;
+        f.rot = d;
+        f.go = go;
         f.grid = this;
 
         Buildings[x, y] = f;
@@ -1245,6 +1443,10 @@ public class Grid_Script : MonoBehaviour
         {
             crafting.ClearContents();
         }
+        else if (selected is AlloyFurnace alloy)
+        {
+            alloy.ClearContents();
+        }
         else if (selected.item != null && selected.item.go != null)
         {
             Destroy(selected.item.go);
@@ -1349,6 +1551,20 @@ public class Grid_Script : MonoBehaviour
         return item;
     }
 
+    Item CreateAlloyItem(ResourceType primary, ResourceType secondary, int value)
+    {
+        Item alloy = CreateItemFromResource(primary, ItemForm.Ingot);
+        if (alloy == null) return null;
+
+        alloy.value = value;
+        alloy.id = primary.ToString() + "-" + secondary.ToString() + " Alloy";
+        alloy.isAlloy = true;
+        alloy.secondaryResource = secondary;
+        UpdateItemValueLabel(alloy);
+        ColorizeItem(alloy);
+        return alloy;
+    }
+
     void CreateItemValueLabel(Item item)
     {
         if (item == null || item.go == null) return;
@@ -1380,15 +1596,18 @@ public class Grid_Script : MonoBehaviour
     void ColorizeItem(Item item)
     {
         if (item == null || item.go == null) return;
+
+        if (item.isAlloy && item.secondaryResource.HasValue)
+        {
+            ApplyAlloyColors(item);
+            return;
+        }
+
         ColorizeSprite(item.go, item.resource, item.form);
     }
 
-    void ColorizeSprite(GameObject go, ResourceType res, ItemForm form)
+    Color ColorForResource(ResourceType res, ItemForm form)
     {
-        var sr = go.GetComponent<SpriteRenderer>();
-        if (sr == null) return;
-
-        Color c = Color.white;
         bool plateLike = form == ItemForm.Plate || form == ItemForm.Bolt || form == ItemForm.ReinforcedPlate;
 
         Color oreColor = Color.white;
@@ -1414,10 +1633,65 @@ public class Grid_Script : MonoBehaviour
                 break;
         }
 
-        if (form == ItemForm.Ore) c = oreColor;
-        else if (form == ItemForm.Ingot) c = ingotColor;
-        else if (plateLike) c = plateColor;
-        sr.color = c;
+        if (form == ItemForm.Ore) return oreColor;
+        if (form == ItemForm.Ingot) return ingotColor;
+        if (plateLike) return plateColor;
+        return Color.white;
+    }
+
+    void ColorizeSprite(GameObject go, ResourceType res, ItemForm form)
+    {
+        var sr = go.GetComponent<SpriteRenderer>();
+        if (sr == null) return;
+
+        sr.enabled = true;
+        sr.color = ColorForResource(res, form);
+    }
+
+    void ApplyAlloyColors(Item item)
+    {
+        var baseSr = item.go.GetComponent<SpriteRenderer>();
+        if (baseSr == null) return;
+
+        Sprite sprite = baseSr.sprite;
+        int sortingOrder = baseSr.sortingOrder;
+        int sortingLayerId = baseSr.sortingLayerID;
+        baseSr.enabled = false;
+
+        Color primaryColor = ColorForResource(item.resource, ItemForm.Ingot);
+        Color secondaryColor = ColorForResource(item.secondaryResource.Value, ItemForm.Ingot);
+
+        Transform left = item.go.transform.Find("AlloyHalfA");
+        if (left == null)
+        {
+            GameObject half = new GameObject("AlloyHalfA");
+            half.transform.SetParent(item.go.transform);
+            left = half.transform;
+        }
+        var leftSr = left.GetComponent<SpriteRenderer>();
+        if (leftSr == null) leftSr = left.gameObject.AddComponent<SpriteRenderer>();
+        leftSr.sprite = sprite;
+        leftSr.color = primaryColor;
+        leftSr.sortingOrder = sortingOrder;
+        leftSr.sortingLayerID = sortingLayerId;
+        left.localPosition = new Vector3(-0.1f, 0f, 0f);
+        left.localScale = new Vector3(0.5f, 1f, 1f);
+
+        Transform right = item.go.transform.Find("AlloyHalfB");
+        if (right == null)
+        {
+            GameObject half = new GameObject("AlloyHalfB");
+            half.transform.SetParent(item.go.transform);
+            right = half.transform;
+        }
+        var rightSr = right.GetComponent<SpriteRenderer>();
+        if (rightSr == null) rightSr = right.gameObject.AddComponent<SpriteRenderer>();
+        rightSr.sprite = sprite;
+        rightSr.color = secondaryColor;
+        rightSr.sortingOrder = sortingOrder;
+        rightSr.sortingLayerID = sortingLayerId;
+        right.localPosition = new Vector3(0.1f, 0f, 0f);
+        right.localScale = new Vector3(0.5f, 1f, 1f);
     }
 
     public void UpdateDirectionArrow(ref GameObject arrow, Transform parent, Dir dir)
@@ -1609,6 +1883,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingAlloyFurnace = false;
             placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1623,6 +1898,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingAlloyFurnace = false;
             placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1637,6 +1913,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingAlloyFurnace = false;
             placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1651,6 +1928,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingAlloyFurnace = false;
             placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1667,6 +1945,7 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingCraftingTable = false;
             placingItemOnConveyor = false;
+            placingAlloyFurnace = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1681,6 +1960,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingCraftingTable = false;
+            placingAlloyFurnace = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1688,6 +1968,22 @@ public class Grid_Script : MonoBehaviour
         if (GUI.Button(new Rect(20, 130, 90, 20), "Crafting Tbl"))
         {
             placingCraftingTable = true;
+            placingSeller = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingItemOnConveyor = false;
+            placingAlloyFurnace = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 130, 90, 20), "Alloy Furn"))
+        {
+            placingAlloyFurnace = true;
+            placingCraftingTable = false;
             placingSeller = false;
             placingConveyor = false;
             placingFurnace = false;
@@ -1710,6 +2006,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingSeller = false;
             placingCraftingTable = false;
+            placingAlloyFurnace = false;
             ClearGhost();
             ClearSelection();
 
