@@ -1,5 +1,6 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 
 public class Grid_Script : MonoBehaviour
 {
@@ -23,6 +24,9 @@ public class Grid_Script : MonoBehaviour
     public GameObject nodePrefab;
     public GameObject sellerPrefab;
     public GameObject platePrefab;
+    public GameObject boltPrefab;
+    public GameObject reinforcedPlatePrefab;
+    public GameObject craftingTablePrefab;
     public GameObject directionArrowPrefab;
 
     // ==== Furnace Sprites ====
@@ -38,6 +42,7 @@ public class Grid_Script : MonoBehaviour
     bool placingMiner;
     bool placingSeller;
     bool placingForge;
+    bool placingCraftingTable;
     Dir placementDir = Dir.N;
 
     // ==== Debug-Item auf Conveyor setzen ====
@@ -55,7 +60,9 @@ public class Grid_Script : MonoBehaviour
     {
         Ore,
         Ingot,
-        Plate
+        Plate,
+        Bolt,
+        ReinforcedPlate
     }
 
     public enum ResourceType
@@ -342,6 +349,14 @@ public class Grid_Script : MonoBehaviour
         public float processTime = 2f;
         float t;
 
+        public enum ForgeRecipe
+        {
+            IngotToPlate,
+            IngotToBolt
+        }
+
+        public ForgeRecipe recipe = ForgeRecipe.IngotToPlate;
+
         public override bool CanAccept(Item i)
         {
             if (i == null) return false;
@@ -383,35 +398,42 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t >= processTime)
             {
-                Item plate = grid != null ? grid.CreateItemFromResource(item.resource, ItemForm.Plate) : null;
-                if (item.go != null) UnityEngine.Object.Destroy(item.go);
-
-                if (plate != null)
-                {
-                    plate.value = item.value + 2;
-                    plate.id = item.resource.ToString() + " Plate";
-                    if (grid != null)
-                    {
-                        grid.UpdateItemValueLabel(plate);
-                    }
-                    plate.go.transform.position = Center();
-                    item = plate;
-                }
-                else
-                {
-                    item.form = ItemForm.Plate;
-                    item.value += 2;
-                    item.id = item.resource.ToString() + " Plate";
-                    if (grid != null)
-                    {
-                        grid.ColorizeItem(item);
-                        grid.UpdateItemValueLabel(item);
-                    }
-                }
-
-                AttemptOutput();
+                ProcessRecipe();
                 t = 0f;
             }
+        }
+
+        void ProcessRecipe()
+        {
+            ItemForm targetForm = recipe == ForgeRecipe.IngotToPlate ? ItemForm.Plate : ItemForm.Bolt;
+            Item result = grid != null ? grid.CreateItemFromResource(item.resource, targetForm) : null;
+            if (item.go != null) UnityEngine.Object.Destroy(item.go);
+
+            if (result != null)
+            {
+                int valueDelta = recipe == ForgeRecipe.IngotToPlate ? 2 : 1;
+                result.value = item.value + valueDelta;
+                result.id = item.resource.ToString() + (recipe == ForgeRecipe.IngotToPlate ? " Plate" : " Bolt");
+                if (grid != null)
+                {
+                    grid.UpdateItemValueLabel(result);
+                }
+                result.go.transform.position = Center();
+                item = result;
+            }
+            else
+            {
+                item.form = targetForm;
+                item.value += recipe == ForgeRecipe.IngotToPlate ? 2 : 1;
+                item.id = item.resource.ToString() + (recipe == ForgeRecipe.IngotToPlate ? " Plate" : " Bolt");
+                if (grid != null)
+                {
+                    grid.ColorizeItem(item);
+                    grid.UpdateItemValueLabel(item);
+                }
+            }
+
+            AttemptOutput();
         }
 
         void AttemptOutput()
@@ -643,6 +665,186 @@ public class Grid_Script : MonoBehaviour
         }
     }
 
+    public class CraftingTable : Building
+    {
+        List<Item> inputs = new List<Item>();
+
+        void UpdateDirection()
+        {
+            if (grid == null || go == null) return;
+            grid.UpdateDirectionArrow(ref directionArrow, go.transform, rot);
+        }
+
+        public override bool CanAccept(Item i)
+        {
+            if (i == null) return false;
+            if (item != null) return false; // Output slot occupied
+            if (inputs.Count >= 3) return false;
+            if (i.form != ItemForm.Bolt && i.form != ItemForm.Plate) return false;
+            return true;
+        }
+
+        public override bool Accept(Item i)
+        {
+            if (!CanAccept(i)) return false;
+            inputs.Add(i);
+            RepositionInputs();
+            UpdateDirection();
+            return true;
+        }
+
+        public override void Tick(float dt)
+        {
+            if (item != null)
+            {
+                AttemptOutput();
+                return;
+            }
+
+            TryCraft();
+        }
+
+        void TryCraft()
+        {
+            int boltCount = 0;
+            int plateCount = 0;
+            foreach (var it in inputs)
+            {
+                if (it.form == ItemForm.Bolt) boltCount++;
+                else if (it.form == ItemForm.Plate) plateCount++;
+            }
+
+            if (boltCount < 2 || plateCount < 1) return;
+
+            if (inputs.Count == 0) return;
+            ResourceType res = inputs[0].resource;
+            foreach (var it in inputs)
+            {
+                if (it.resource != res) return; // require matching resources
+            }
+
+            Item boltA = RemoveInput(ItemForm.Bolt);
+            Item boltB = RemoveInput(ItemForm.Bolt);
+            Item plate = RemoveInput(ItemForm.Plate);
+
+            if (boltA == null || boltB == null || plate == null) return;
+
+            int inputValue = boltA.value + boltB.value + plate.value;
+            int outputValue = inputValue * 2;
+
+            ConsumeItem(boltA);
+            ConsumeItem(boltB);
+            ConsumeItem(plate);
+
+            Item reinforced = grid != null ? grid.CreateItemFromResource(res, ItemForm.ReinforcedPlate) : null;
+            if (reinforced != null)
+            {
+                reinforced.value = outputValue;
+                reinforced.id = res.ToString() + " Reinforced Plate";
+                if (grid != null) grid.UpdateItemValueLabel(reinforced);
+                reinforced.go.transform.position = Center();
+                item = reinforced;
+            }
+            else
+            {
+                GameObject go = new GameObject("ReinforcedPlate");
+                go.transform.position = Center();
+                Item fallback = new Item(res.ToString() + " Reinforced Plate", res, outputValue, ItemForm.ReinforcedPlate, go);
+                item = fallback;
+                if (grid != null)
+                {
+                    grid.ColorizeItem(item);
+                    grid.CreateItemValueLabel(item);
+                }
+            }
+
+            AttemptOutput();
+            RepositionInputs();
+        }
+
+        Item RemoveInput(ItemForm form)
+        {
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (inputs[i].form == form)
+                {
+                    Item it = inputs[i];
+                    inputs.RemoveAt(i);
+                    return it;
+                }
+            }
+            return null;
+        }
+
+        public (int bolts, int plates) InputCounts()
+        {
+            int bolts = 0;
+            int plates = 0;
+            foreach (var it in inputs)
+            {
+                if (it.form == ItemForm.Bolt) bolts++;
+                else if (it.form == ItemForm.Plate) plates++;
+            }
+            return (bolts, plates);
+        }
+
+        void ConsumeItem(Item it)
+        {
+            if (it == null) return;
+            if (it.go != null) UnityEngine.Object.Destroy(it.go);
+        }
+
+        void AttemptOutput()
+        {
+            if (item == null) return;
+
+            var step = StepForDir(rot);
+            int tx = x + step.dx;
+            int ty = y + step.dy;
+            if (!InBounds(tx, ty)) return;
+
+            var nb = Buildings[tx, ty];
+            if (nb != null && nb.CanAccept(item))
+            {
+                nb.Accept(item);
+                item = null;
+            }
+            else if (item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
+            }
+        }
+
+        void RepositionInputs()
+        {
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (inputs[i].go == null) continue;
+                Vector3 p = Center();
+                p.z = ITEM_Z;
+                p.x += (i - 1) * 0.1f;
+                inputs[i].go.transform.position = p;
+                var sr = inputs[i].go.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10 + i;
+            }
+        }
+
+        public override bool IsRotatable() { return false; }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            RepositionInputs();
+            if (item != null && item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
+            }
+            UpdateDirection();
+        }
+    }
+
     Node[,] nodes = new Node[GridSizeX, GridSizeY];
     float totalMoney;
 
@@ -664,6 +866,7 @@ public class Grid_Script : MonoBehaviour
         if (placingMiner) UpdateGhost(minerPrefab);
         if (placingSeller) UpdateGhost(sellerPrefab);
         if (placingForge) UpdateGhost(forgePrefab);
+        if (placingCraftingTable) UpdateGhost(craftingTablePrefab);
 
         if (placingItemOnConveyor && itemGhost != null)
         {
@@ -695,7 +898,7 @@ public class Grid_Script : MonoBehaviour
             {
                 selected.RotateClockwise();
             }
-            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingForge)
+            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingForge || placingCraftingTable)
             {
                 RotatePlacementDirection();
             }
@@ -714,6 +917,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingSeller = false;
+            placingCraftingTable = false;
             placingItemOnConveyor = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -735,6 +939,7 @@ public class Grid_Script : MonoBehaviour
             if (placingSplitter) { TryPlaceSplitter(cell.x, cell.y); return; }
             if (placingMiner) { TryPlaceMiner(cell.x, cell.y); return; }
             if (placingSeller) { TryPlaceSeller(cell.x, cell.y); return; }
+            if (placingCraftingTable) { TryPlaceCraftingTable(cell.x, cell.y); return; }
             if (placingItemOnConveyor) { TryAssignItemToConveyor(cell.x, cell.y); return; }
 
             SelectBuildingAt(cell.x, cell.y);
@@ -771,7 +976,7 @@ public class Grid_Script : MonoBehaviour
             ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             ClearGhostDirectionArrow();
         }
-        else if (placingFurnace || placingMiner || placingForge)
+        else if (placingFurnace || placingMiner || placingForge || placingCraftingTable)
         {
             ghost.transform.rotation = Quaternion.identity;
             UpdateGhostDirectionArrow();
@@ -811,7 +1016,7 @@ public class Grid_Script : MonoBehaviour
             {
                 ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             }
-            else if (placingFurnace || placingMiner || placingForge)
+            else if (placingFurnace || placingMiner || placingForge || placingCraftingTable)
             {
                 UpdateGhostDirectionArrow();
             }
@@ -879,6 +1084,25 @@ public class Grid_Script : MonoBehaviour
 
         Buildings[x, y] = f;
         f.OnMoved();
+    }
+
+    void TryPlaceCraftingTable(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (craftingTablePrefab == null) return;
+
+        Dir d = placementDir;
+
+        GameObject go = Instantiate(craftingTablePrefab, CellCenter(x, y), Quaternion.identity);
+
+        CraftingTable table = new CraftingTable();
+        table.x = x; table.y = y;
+        table.rot = d;
+        table.go = go;
+        table.grid = this;
+
+        Buildings[x, y] = table;
+        table.OnMoved();
     }
 
     void TryPlaceSplitter(int x, int y)
@@ -1049,7 +1273,15 @@ public class Grid_Script : MonoBehaviour
 
     Item CreateItemFromResource(ResourceType res, ItemForm form)
     {
-        GameObject prefab = form == ItemForm.Ore ? orePrefab : (form == ItemForm.Ingot ? ingotPrefab : platePrefab ?? ingotPrefab);
+        GameObject prefab = null;
+        switch (form)
+        {
+            case ItemForm.Ore: prefab = orePrefab; break;
+            case ItemForm.Ingot: prefab = ingotPrefab; break;
+            case ItemForm.Plate: prefab = platePrefab ?? ingotPrefab; break;
+            case ItemForm.Bolt: prefab = boltPrefab ?? ingotPrefab; break;
+            case ItemForm.ReinforcedPlate: prefab = reinforcedPlatePrefab ?? platePrefab ?? ingotPrefab; break;
+        }
         if (prefab == null) return null;
         GameObject go = Instantiate(prefab, Vector3.zero, Quaternion.identity);
         Vector3 p = go.transform.position; p.z = ITEM_Z;
@@ -1059,8 +1291,24 @@ public class Grid_Script : MonoBehaviour
         if (sr != null) sr.sortingOrder = 10;
 
         int baseValue = res == ResourceType.Copper ? 1 : (res == ResourceType.Iron ? 2 : 3);
-        int value = baseValue + (form == ItemForm.Ingot ? 1 : form == ItemForm.Plate ? 3 : 0);
-        string suffix = form == ItemForm.Ore ? " Ore" : (form == ItemForm.Ingot ? " Ingot" : " Plate");
+        int value = baseValue;
+        switch (form)
+        {
+            case ItemForm.Ingot: value = baseValue + 1; break;
+            case ItemForm.Plate: value = baseValue + 3; break;
+            case ItemForm.Bolt: value = baseValue + 2; break;
+            case ItemForm.ReinforcedPlate: value = baseValue + 5; break;
+            default: value = baseValue; break;
+        }
+        string suffix = "";
+        switch (form)
+        {
+            case ItemForm.Ore: suffix = " Ore"; break;
+            case ItemForm.Ingot: suffix = " Ingot"; break;
+            case ItemForm.Plate: suffix = " Plate"; break;
+            case ItemForm.Bolt: suffix = " Bolt"; break;
+            case ItemForm.ReinforcedPlate: suffix = " Reinforced Plate"; break;
+        }
         Item item = new Item(res.ToString() + suffix, res, value, form, go);
         ColorizeItem(item);
         CreateItemValueLabel(item);
@@ -1107,24 +1355,34 @@ public class Grid_Script : MonoBehaviour
         if (sr == null) return;
 
         Color c = Color.white;
+        bool plateLike = form == ItemForm.Plate || form == ItemForm.Bolt || form == ItemForm.ReinforcedPlate;
+
+        Color oreColor = Color.white;
+        Color ingotColor = Color.white;
+        Color plateColor = Color.white;
+
         switch (res)
         {
             case ResourceType.Copper:
-                c = form == ItemForm.Ore ? new Color(0.95f, 0.5f, 0.3f, 1f)
-                  : form == ItemForm.Ingot ? new Color(1f, 0.65f, 0.4f, 1f)
-                  : new Color(1f, 0.4f, 0.4f, 1f);
+                oreColor = new Color(0.95f, 0.5f, 0.3f, 1f);
+                ingotColor = new Color(1f, 0.65f, 0.4f, 1f);
+                plateColor = new Color(1f, 0.4f, 0.4f, 1f);
                 break;
             case ResourceType.Iron:
-                c = form == ItemForm.Ore ? new Color(0.65f, 0.65f, 0.7f, 1f)
-                  : form == ItemForm.Ingot ? new Color(0.8f, 0.8f, 0.85f, 1f)
-                  : new Color(0.85f, 0.75f, 0.85f, 1f);
+                oreColor = new Color(0.65f, 0.65f, 0.7f, 1f);
+                ingotColor = new Color(0.8f, 0.8f, 0.85f, 1f);
+                plateColor = new Color(0.85f, 0.75f, 0.85f, 1f);
                 break;
             case ResourceType.Gold:
-                c = form == ItemForm.Ore ? new Color(0.95f, 0.8f, 0.25f, 1f)
-                  : form == ItemForm.Ingot ? new Color(1f, 0.9f, 0.4f, 1f)
-                  : new Color(1f, 0.75f, 0.3f, 1f);
+                oreColor = new Color(0.95f, 0.8f, 0.25f, 1f);
+                ingotColor = new Color(1f, 0.9f, 0.4f, 1f);
+                plateColor = new Color(1f, 0.75f, 0.3f, 1f);
                 break;
         }
+
+        if (form == ItemForm.Ore) c = oreColor;
+        else if (form == ItemForm.Ingot) c = ingotColor;
+        else if (plateLike) c = plateColor;
         sr.color = c;
     }
 
@@ -1176,6 +1434,44 @@ public class Grid_Script : MonoBehaviour
     public void AddMoney(float amount)
     {
         totalMoney += amount;
+    }
+
+    void DrawRecipeButton(Rect rect, string label, bool active, Action onClick)
+    {
+        Color prev = GUI.color;
+        if (active) GUI.color = new Color(0.7f, 1f, 0.7f, 1f);
+        if (GUI.Button(rect, label)) onClick();
+        GUI.color = prev;
+    }
+
+    void DrawSelectedBuildingUI()
+    {
+        if (selected == null || Camera.main == null) return;
+
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(selected.Center() + new Vector3(0f, 0.6f, 0f));
+        float boxWidth = 170f;
+        float boxHeight = (selected is Forge) ? 90f : (selected is CraftingTable ? 80f : 0f);
+        if (boxHeight <= 0f) return;
+
+        float x = Mathf.Clamp(screenPos.x - boxWidth / 2f, 5f, Screen.width - boxWidth - 5f);
+        float y = Mathf.Clamp(Screen.height - screenPos.y - boxHeight, 5f, Screen.height - boxHeight - 5f);
+
+        Rect boxRect = new Rect(x, y, boxWidth, boxHeight);
+        string title = selected is Forge ? "Forge" : "Crafting Table";
+        GUI.Box(boxRect, title);
+
+        if (selected is Forge forge)
+        {
+            DrawRecipeButton(new Rect(boxRect.x + 10, boxRect.y + 20, boxWidth - 20, 20), "Ingot -> Plate", forge.recipe == Forge.ForgeRecipe.IngotToPlate, () => forge.recipe = Forge.ForgeRecipe.IngotToPlate);
+            DrawRecipeButton(new Rect(boxRect.x + 10, boxRect.y + 45, boxWidth - 20, 20), "Ingot -> Bolt", forge.recipe == Forge.ForgeRecipe.IngotToBolt, () => forge.recipe = Forge.ForgeRecipe.IngotToBolt);
+        }
+        else if (selected is CraftingTable table)
+        {
+            var counts = table.InputCounts();
+            GUI.Label(new Rect(boxRect.x + 10, boxRect.y + 20, boxWidth - 20, 20), "2 Bolts + 1 Plate");
+            GUI.Label(new Rect(boxRect.x + 10, boxRect.y + 40, boxWidth - 20, 20), "= Reinforced Plate");
+            GUI.Label(new Rect(boxRect.x + 10, boxRect.y + 60, boxWidth - 20, 20), $"Inputs: {counts.bolts} bolts, {counts.plates} plates");
+        }
     }
 
 
@@ -1254,9 +1550,11 @@ public class Grid_Script : MonoBehaviour
         moneyStyle.fontSize = 18;
         GUI.Label(new Rect(Screen.width - 180, 10, 170, 30), "€ " + totalMoney.ToString("F0"), moneyStyle);
 
+        DrawSelectedBuildingUI();
+
         if (!ToggleBuildMenu) return;
 
-        GUI.Box(new Rect(10, 10, 260, 250), "Build");
+        GUI.Box(new Rect(10, 10, 260, 280), "Build");
         if (GUI.Button(new Rect(20, 40, 90, 20), "Conveyor"))
         {
             placingConveyor = true;
@@ -1266,6 +1564,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1279,6 +1578,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1292,6 +1592,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1305,6 +1606,7 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingCraftingTable = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -1318,6 +1620,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingItemOnConveyor = false;
             placingSeller = false;
+            placingCraftingTable = false;
             placingItemOnConveyor = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1332,12 +1635,27 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            placingCraftingTable = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(20, 130, 90, 20), "Crafting Tbl"))
+        {
+            placingCraftingTable = true;
+            placingSeller = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingItemOnConveyor = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
 
-        if (GUI.Button(new Rect(20, 130, 90, 20), "Debug Item"))
+        if (GUI.Button(new Rect(20, 160, 90, 20), "Debug Item"))
         {
             placingItemOnConveyor = true;
             placingConveyor = false;
@@ -1346,6 +1664,7 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingSeller = false;
+            placingCraftingTable = false;
             ClearGhost();
             ClearSelection();
 
@@ -1359,9 +1678,9 @@ public class Grid_Script : MonoBehaviour
             }
         }
 
-        GUI.Label(new Rect(20, 160, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
-        GUI.Label(new Rect(20, 180, 220, 20), "Drag=Bewegen, Pfeil=Ausgaberichtung");
-        GUI.Label(new Rect(20, 200, 220, 20), "Splitter: L/F/R Round-Robin");
-        GUI.Label(new Rect(20, 220, 220, 20), "Miner/Forge nur auf Nodes/Ingot");
+        GUI.Label(new Rect(20, 190, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
+        GUI.Label(new Rect(20, 210, 220, 20), "Drag=Bewegen, Pfeil=Ausgaberichtung");
+        GUI.Label(new Rect(20, 230, 220, 20), "Splitter: L/F/R Round-Robin");
+        GUI.Label(new Rect(20, 250, 220, 20), "Miner/Forge nur auf Nodes/Ingot");
     }
 }
