@@ -1714,7 +1714,11 @@ public class Grid_Script : MonoBehaviour
         Rect rect = source.textureRect;
         float halfWidth = rect.width * 0.5f;
         Rect subRect = new Rect(rect.x + (leftHalf ? 0f : halfWidth), rect.y, halfWidth, rect.height);
-        Vector2 pivot = new Vector2(subRect.width * 0.5f, subRect.height * 0.5f);
+
+        // Preserve the original pivot so the half sprites align with the base silhouette.
+        float pivotXInSource = source.pivot.x - (leftHalf ? 0f : halfWidth);
+        Vector2 pivot = new Vector2(pivotXInSource / subRect.width, source.pivot.y / subRect.height);
+
         Sprite halfSprite = Sprite.Create(source.texture, subRect, pivot, source.pixelsPerUnit, 0, SpriteMeshType.FullRect, source.border);
         halfSprite.name = source.name + (leftHalf ? "_AlloyLeft" : "_AlloyRight");
 
