@@ -730,6 +730,7 @@ public class Grid_Script : MonoBehaviour
             if (boltA == null || boltB == null || plate == null) return;
 
             int inputValue = boltA.value + boltB.value + plate.value;
+            int outputValue = inputValue * 2;
 
             ConsumeItem(boltA);
             ConsumeItem(boltB);
@@ -738,7 +739,7 @@ public class Grid_Script : MonoBehaviour
             Item reinforced = grid != null ? grid.CreateItemFromResource(res, ItemForm.ReinforcedPlate) : null;
             if (reinforced != null)
             {
-                reinforced.value = inputValue + 2;
+                reinforced.value = outputValue;
                 reinforced.id = res.ToString() + " Reinforced Plate";
                 if (grid != null) grid.UpdateItemValueLabel(reinforced);
                 reinforced.go.transform.position = Center();
@@ -748,7 +749,7 @@ public class Grid_Script : MonoBehaviour
             {
                 GameObject go = new GameObject("ReinforcedPlate");
                 go.transform.position = Center();
-                Item fallback = new Item(res.ToString() + " Reinforced Plate", res, inputValue + 2, ItemForm.ReinforcedPlate, go);
+                Item fallback = new Item(res.ToString() + " Reinforced Plate", res, outputValue, ItemForm.ReinforcedPlate, go);
                 item = fallback;
                 if (grid != null)
                 {
@@ -1452,7 +1453,10 @@ public class Grid_Script : MonoBehaviour
         float boxHeight = (selected is Forge) ? 90f : (selected is CraftingTable ? 80f : 0f);
         if (boxHeight <= 0f) return;
 
-        Rect boxRect = new Rect(screenPos.x - boxWidth / 2f, Screen.height - screenPos.y - boxHeight, boxWidth, boxHeight);
+        float x = Mathf.Clamp(screenPos.x - boxWidth / 2f, 5f, Screen.width - boxWidth - 5f);
+        float y = Mathf.Clamp(Screen.height - screenPos.y - boxHeight, 5f, Screen.height - boxHeight - 5f);
+
+        Rect boxRect = new Rect(x, y, boxWidth, boxHeight);
         string title = selected is Forge ? "Forge" : "Crafting Table";
         GUI.Box(boxRect, title);
 
