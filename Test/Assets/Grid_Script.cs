@@ -882,7 +882,13 @@ public class Grid_Script : MonoBehaviour
             var (bolts, plates) = InputCounts();
             if (i.form == ItemForm.Bolt && bolts >= 2) return false;
             if (i.form == ItemForm.Plate && plates >= 1) return false;
-            if (inputs.Count > 0 && inputs[0].resource != i.resource) return false;
+            if (inputs.Count > 0)
+            {
+                var first = inputs[0];
+                if (first.resource != i.resource) return false;
+                if (first.isAlloy != i.isAlloy) return false;
+                if (first.isAlloy && first.secondaryResource != i.secondaryResource) return false;
+            }
             return true;
         }
 
@@ -920,9 +926,13 @@ public class Grid_Script : MonoBehaviour
 
             if (inputs.Count == 0) return;
             ResourceType res = inputs[0].resource;
+            bool inputsAlloy = inputs[0].isAlloy && inputs[0].secondaryResource.HasValue;
+            ResourceType? secondaryRes = inputsAlloy ? inputs[0].secondaryResource : null;
             foreach (var it in inputs)
             {
                 if (it.resource != res) return; // require matching resources
+                if (inputsAlloy != (it.isAlloy && it.secondaryResource.HasValue)) return;
+                if (inputsAlloy && it.secondaryResource != secondaryRes) return;
             }
 
             Item boltA = RemoveInput(ItemForm.Bolt);
@@ -939,11 +949,20 @@ public class Grid_Script : MonoBehaviour
             ConsumeItem(plate);
 
             Item reinforced = grid != null ? grid.CreateItemFromResource(res, ItemForm.ReinforcedPlate) : null;
+            string reinforcedId = inputsAlloy && secondaryRes.HasValue
+                ? res.ToString() + "-" + secondaryRes.Value.ToString() + " Alloy Reinforced Plate"
+                : res.ToString() + " Reinforced Plate";
             if (reinforced != null)
             {
                 reinforced.value = outputValue;
-                reinforced.id = res.ToString() + " Reinforced Plate";
+                reinforced.id = reinforcedId;
+                if (inputsAlloy && secondaryRes.HasValue)
+                {
+                    reinforced.isAlloy = true;
+                    reinforced.secondaryResource = secondaryRes;
+                }
                 if (grid != null) grid.UpdateItemValueLabel(reinforced);
+                if (grid != null) grid.ColorizeItem(reinforced);
                 reinforced.go.transform.position = Center();
                 item = reinforced;
             }
@@ -951,7 +970,9 @@ public class Grid_Script : MonoBehaviour
             {
                 GameObject go = new GameObject("ReinforcedPlate");
                 go.transform.position = Center();
-                Item fallback = new Item(res.ToString() + " Reinforced Plate", res, outputValue, ItemForm.ReinforcedPlate, go);
+                Item fallback = new Item(reinforcedId, res, outputValue, ItemForm.ReinforcedPlate, go);
+                fallback.isAlloy = inputsAlloy;
+                fallback.secondaryResource = secondaryRes;
                 item = fallback;
                 if (grid != null)
                 {
@@ -1283,11 +1304,12 @@ public class Grid_Script : MonoBehaviour
         {
             ghostCostLabel = new GameObject("CostLabel");
             ghostCostLabel.transform.SetParent(ghost.transform);
-            ghostCostLabel.transform.localPosition = new Vector3(0f, 0.6f, -0.05f);
+            ghostCostLabel.transform.localPosition = new Vector3(0f, 0.05f, -0.05f);
             var tm = ghostCostLabel.AddComponent<TextMesh>();
             tm.anchor = TextAnchor.MiddleCenter;
             tm.alignment = TextAlignment.Center;
-            tm.fontSize = 48;
+            tm.fontSize = 32;
+            tm.characterSize = 0.04f;
             tm.color = Color.yellow;
 
             var renderer = ghostCostLabel.GetComponent<MeshRenderer>();
