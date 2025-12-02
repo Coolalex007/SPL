@@ -1321,6 +1321,8 @@ public class Grid_Script : MonoBehaviour
         {
             textMesh.text = "€" + cost.ToString("F0");
         }
+
+        ghostCostLabel.transform.rotation = Quaternion.identity;
     }
 
     void RotatePlacementDirection()
@@ -1564,6 +1566,8 @@ public class Grid_Script : MonoBehaviour
     {
         if (selected == null) return;
 
+        float refundAmount = GetRefundAmount(selected);
+
         if (selected is CraftingTable crafting)
         {
             crafting.ClearContents();
@@ -1583,7 +1587,22 @@ public class Grid_Script : MonoBehaviour
         if (InBounds(selected.x, selected.y) && Buildings[selected.x, selected.y] == selected)
             Buildings[selected.x, selected.y] = null;
 
+        if (refundAmount > 0f) AddMoney(refundAmount);
+
         selected = null;
+    }
+
+    float GetRefundAmount(Building b)
+    {
+        if (b is Conveyor) return conveyorCost;
+        if (b is Furnace) return furnaceCost;
+        if (b is AlloyFurnace) return alloyFurnaceCost;
+        if (b is Forge) return forgeCost;
+        if (b is CraftingTable) return craftingTableCost;
+        if (b is Splitter3) return splitterCost;
+        if (b is Seller) return sellerCost;
+        if (b is Miner) return minerCost;
+        return 0f;
     }
 
     // ==== Hilfen ====
