@@ -585,16 +585,32 @@ public class Grid_Script : MonoBehaviour
         void ProcessRecipe()
         {
             ItemForm targetForm = recipe == ForgeRecipe.IngotToPlate ? ItemForm.Plate : ItemForm.Bolt;
-            Item result = grid != null ? grid.CreateItemFromResource(item.resource, targetForm) : null;
+            bool itemIsAlloy = item.isAlloy && item.secondaryResource.HasValue;
+
+            Item result = null;
+            if (grid != null)
+            {
+                result = grid.CreateItemFromResource(item.resource, targetForm);
+                if (result != null && itemIsAlloy)
+                {
+                    result.isAlloy = true;
+                    result.secondaryResource = item.secondaryResource;
+                }
+            }
             if (item.go != null) UnityEngine.Object.Destroy(item.go);
+
+            int valueDelta = recipe == ForgeRecipe.IngotToPlate ? 2 : 1;
+            string suffix = recipe == ForgeRecipe.IngotToPlate ? " Plate" : " Bolt";
 
             if (result != null)
             {
-                int valueDelta = recipe == ForgeRecipe.IngotToPlate ? 2 : 1;
                 result.value = item.value + valueDelta;
-                result.id = item.resource.ToString() + (recipe == ForgeRecipe.IngotToPlate ? " Plate" : " Bolt");
+                result.id = itemIsAlloy
+                    ? item.resource.ToString() + "-" + item.secondaryResource.Value.ToString() + " Alloy" + suffix
+                    : item.resource.ToString() + suffix;
                 if (grid != null)
                 {
+                    grid.ColorizeItem(result);
                     grid.UpdateItemValueLabel(result);
                 }
                 result.go.transform.position = Center();
@@ -603,8 +619,11 @@ public class Grid_Script : MonoBehaviour
             else
             {
                 item.form = targetForm;
-                item.value += recipe == ForgeRecipe.IngotToPlate ? 2 : 1;
-                item.id = item.resource.ToString() + (recipe == ForgeRecipe.IngotToPlate ? " Plate" : " Bolt");
+                item.value += valueDelta;
+                item.id = itemIsAlloy
+                    ? item.resource.ToString() + "-" + item.secondaryResource.Value.ToString() + " Alloy" + suffix
+                    : item.resource.ToString() + suffix;
+                item.isAlloy = itemIsAlloy;
                 if (grid != null)
                 {
                     grid.ColorizeItem(item);
@@ -1661,8 +1680,8 @@ public class Grid_Script : MonoBehaviour
         int sortingLayerId = baseSr.sortingLayerID;
         baseSr.enabled = false;
 
-        Color primaryColor = ColorForResource(item.resource, ItemForm.Ingot);
-        Color secondaryColor = ColorForResource(item.secondaryResource.Value, ItemForm.Ingot);
+        Color primaryColor = ColorForResource(item.resource, item.form);
+        Color secondaryColor = ColorForResource(item.secondaryResource.Value, item.form);
 
         Sprite leftSprite = CreateHalfSprite(sprite, true);
         Sprite rightSprite = CreateHalfSprite(sprite, false);
