@@ -52,6 +52,7 @@ public class Grid_Script : MonoBehaviour
     // ==== Auswahl / Bearbeitung ====
     Building selected;
     bool dragging;
+    Rect? selectedUIRect;
 
     // ==== Datentypen ====
     public enum Dir { N, E, S, W }
@@ -929,6 +930,14 @@ public class Grid_Script : MonoBehaviour
 
     void HandleMouse()
     {
+        bool mouseOverSelectedUI = IsMouseOverSelectedUI();
+
+        if (mouseOverSelectedUI && (Input.GetMouseButtonDown(0) || Input.GetMouseButton(0)))
+        {
+            dragging = false;
+            return;
+        }
+
         var cell = MouseCell();
 
         if (Input.GetMouseButtonDown(0))
@@ -1446,6 +1455,8 @@ public class Grid_Script : MonoBehaviour
 
     void DrawSelectedBuildingUI()
     {
+        selectedUIRect = null;
+
         if (selected == null || Camera.main == null) return;
 
         Vector3 screenPos = Camera.main.WorldToScreenPoint(selected.Center() + new Vector3(0f, 0.6f, 0f));
@@ -1457,6 +1468,7 @@ public class Grid_Script : MonoBehaviour
         float y = Mathf.Clamp(Screen.height - screenPos.y - boxHeight, 5f, Screen.height - boxHeight - 5f);
 
         Rect boxRect = new Rect(x, y, boxWidth, boxHeight);
+        selectedUIRect = boxRect;
         string title = selected is Forge ? "Forge" : "Crafting Table";
         GUI.Box(boxRect, title);
 
@@ -1472,6 +1484,14 @@ public class Grid_Script : MonoBehaviour
             GUI.Label(new Rect(boxRect.x + 10, boxRect.y + 40, boxWidth - 20, 20), "= Reinforced Plate");
             GUI.Label(new Rect(boxRect.x + 10, boxRect.y + 60, boxWidth - 20, 20), $"Inputs: {counts.bolts} bolts, {counts.plates} plates");
         }
+    }
+
+    bool IsMouseOverSelectedUI()
+    {
+        if (selectedUIRect == null) return false;
+
+        Vector2 mouseGuiPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+        return selectedUIRect.Value.Contains(mouseGuiPos);
     }
 
 
