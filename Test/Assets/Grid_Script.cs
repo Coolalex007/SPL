@@ -30,6 +30,9 @@ public class Grid_Script : MonoBehaviour
     public GameObject craftingTablePrefab;
     public GameObject directionArrowPrefab;
 
+    Dictionary<int, Sprite> alloyHalfLeftCache = new Dictionary<int, Sprite>();
+    Dictionary<int, Sprite> alloyHalfRightCache = new Dictionary<int, Sprite>();
+
     // ==== Furnace Sprites ====
     public Sprite furnaceOffSprite;
     public Sprite furnaceOnSprite;
@@ -1661,6 +1664,12 @@ public class Grid_Script : MonoBehaviour
         Color primaryColor = ColorForResource(item.resource, ItemForm.Ingot);
         Color secondaryColor = ColorForResource(item.secondaryResource.Value, ItemForm.Ingot);
 
+        Sprite leftSprite = CreateHalfSprite(sprite, true);
+        Sprite rightSprite = CreateHalfSprite(sprite, false);
+        if (leftSprite == null || rightSprite == null) return;
+
+        float halfOffset = sprite.bounds.extents.x * 0.5f;
+
         Transform left = item.go.transform.Find("AlloyHalfA");
         if (left == null)
         {
@@ -1670,12 +1679,12 @@ public class Grid_Script : MonoBehaviour
         }
         var leftSr = left.GetComponent<SpriteRenderer>();
         if (leftSr == null) leftSr = left.gameObject.AddComponent<SpriteRenderer>();
-        leftSr.sprite = sprite;
+        leftSr.sprite = leftSprite;
         leftSr.color = primaryColor;
         leftSr.sortingOrder = sortingOrder;
         leftSr.sortingLayerID = sortingLayerId;
-        left.localPosition = new Vector3(-0.1f, 0f, 0f);
-        left.localScale = new Vector3(0.5f, 1f, 1f);
+        left.localPosition = new Vector3(-halfOffset, 0f, 0f);
+        left.localScale = Vector3.one;
 
         Transform right = item.go.transform.Find("AlloyHalfB");
         if (right == null)
@@ -1686,12 +1695,31 @@ public class Grid_Script : MonoBehaviour
         }
         var rightSr = right.GetComponent<SpriteRenderer>();
         if (rightSr == null) rightSr = right.gameObject.AddComponent<SpriteRenderer>();
-        rightSr.sprite = sprite;
+        rightSr.sprite = rightSprite;
         rightSr.color = secondaryColor;
         rightSr.sortingOrder = sortingOrder;
         rightSr.sortingLayerID = sortingLayerId;
-        right.localPosition = new Vector3(0.1f, 0f, 0f);
-        right.localScale = new Vector3(0.5f, 1f, 1f);
+        right.localPosition = new Vector3(halfOffset, 0f, 0f);
+        right.localScale = Vector3.one;
+    }
+
+    Sprite CreateHalfSprite(Sprite source, bool leftHalf)
+    {
+        if (source == null || source.texture == null) return null;
+
+        int key = source.GetInstanceID() ^ (leftHalf ? 0x1 : 0x2);
+        var cache = leftHalf ? alloyHalfLeftCache : alloyHalfRightCache;
+        if (cache.TryGetValue(key, out Sprite cached) && cached != null) return cached;
+
+        Rect rect = source.textureRect;
+        float halfWidth = rect.width * 0.5f;
+        Rect subRect = new Rect(rect.x + (leftHalf ? 0f : halfWidth), rect.y, halfWidth, rect.height);
+        Vector2 pivot = new Vector2(subRect.width * 0.5f, subRect.height * 0.5f);
+        Sprite halfSprite = Sprite.Create(source.texture, subRect, pivot, source.pixelsPerUnit, 0, SpriteMeshType.FullRect, source.border);
+        halfSprite.name = source.name + (leftHalf ? "_AlloyLeft" : "_AlloyRight");
+
+        cache[key] = halfSprite;
+        return halfSprite;
     }
 
     public void UpdateDirectionArrow(ref GameObject arrow, Transform parent, Dir dir)
