@@ -20,7 +20,11 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.2d.aseprite": {
+<<<<<<< Updated upstream
       "version": "2.0.2",
+=======
+      "version": "1.2.4",
+>>>>>>> Stashed changes
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -55,11 +59,19 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.2d.psdimporter": {
+<<<<<<< Updated upstream
       "version": "11.0.1",
       "depth": 1,
       "source": "registry",
       "dependencies": {
         "com.unity.2d.common": "11.0.1",
+=======
+      "version": "10.1.0",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.2d.common": "9.1.0",
+>>>>>>> Stashed changes
         "com.unity.2d.sprite": "1.0.0",
         "com.unity.2d.tilemap": "1.0.0"
       },
@@ -72,11 +84,19 @@
       "dependencies": {}
     },
     "com.unity.2d.spriteshape": {
+<<<<<<< Updated upstream
       "version": "12.0.1",
       "depth": 1,
       "source": "registry",
       "dependencies": {
         "com.unity.2d.common": "11.0.1",
+=======
+      "version": "10.1.0",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.2d.common": "9.1.0",
+>>>>>>> Stashed changes
         "com.unity.mathematics": "1.1.0",
         "com.unity.modules.physics2d": "1.0.0"
       },
@@ -92,7 +112,11 @@
       }
     },
     "com.unity.2d.tilemap.extras": {
+<<<<<<< Updated upstream
       "version": "5.0.1",
+=======
+      "version": "4.3.0",
+>>>>>>> Stashed changes
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -103,7 +127,11 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.burst": {
+<<<<<<< Updated upstream
       "version": "1.8.25",
+=======
+      "version": "1.8.21",
+>>>>>>> Stashed changes
       "depth": 3,
       "source": "registry",
       "dependencies": {
@@ -143,6 +171,7 @@
       "depth": 0,
       "source": "builtin",
       "dependencies": {
+<<<<<<< Updated upstream
         "com.unity.2d.animation": "12.0.2",
         "com.unity.2d.pixel-perfect": "5.1.0",
         "com.unity.2d.psdimporter": "11.0.1",
@@ -151,6 +180,16 @@
         "com.unity.2d.tilemap": "1.0.0",
         "com.unity.2d.tilemap.extras": "5.0.1",
         "com.unity.2d.aseprite": "2.0.2"
+=======
+        "com.unity.2d.animation": "10.2.1",
+        "com.unity.2d.pixel-perfect": "5.1.0",
+        "com.unity.2d.psdimporter": "10.1.0",
+        "com.unity.2d.sprite": "1.0.0",
+        "com.unity.2d.spriteshape": "10.1.0",
+        "com.unity.2d.tilemap": "1.0.0",
+        "com.unity.2d.tilemap.extras": "4.3.0",
+        "com.unity.2d.aseprite": "1.2.4"
+>>>>>>> Stashed changes
       }
     },
     "com.unity.ide.rider": {
