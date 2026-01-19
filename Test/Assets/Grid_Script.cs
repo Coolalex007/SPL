@@ -772,8 +772,8 @@ public class Grid_Script : MonoBehaviour
         public override List<Dir> GetWaterConnections()
         {
             return (rot == Dir.N || rot == Dir.S)
-                ? new List<Dir> { Dir.N, Dir.S }
-                : new List<Dir> { Dir.E, Dir.W };
+                ? new List<Dir> { Dir.E, Dir.W }
+                : new List<Dir> { Dir.N, Dir.S };
         }
     }
 
@@ -1813,6 +1813,8 @@ public class Grid_Script : MonoBehaviour
         Dir d = placementDir;
 
         GameObject go = Instantiate(waterPumpPrefab, CellCenter(x, y), Quaternion.identity);
+        var sr = go.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.sortingOrder = 5;
 
         WaterPump pump = new WaterPump();
         pump.x = x; pump.y = y;
@@ -2061,7 +2063,9 @@ public class Grid_Script : MonoBehaviour
             waterSources[x, y] = true;
             if (waterSourcePrefab != null)
             {
-                Instantiate(waterSourcePrefab, CellCenter(x, y), Quaternion.identity);
+                var source = Instantiate(waterSourcePrefab, CellCenter(x, y), Quaternion.identity);
+                var sr = source.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 0;
             }
             break;
         }
