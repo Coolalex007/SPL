@@ -1367,15 +1367,63 @@ public class Grid_Script : NetworkBehaviour
     public float crossPipeCost = 15f;
     public float oreWasherCost = 120f;
 
-    float totalMoney;
+    [Header("Multiplayer")]
+    [SerializeField]
+    int resourceNodeCount = 5;
+
+    readonly NetworkVariable<float> sharedMoney = new NetworkVariable<float>();
+    readonly NetworkVariable<int> worldSeed = new NetworkVariable<int>();
+
+    bool worldInitialized;
+    (int x, int y)? pendingDragTarget;
 
     // ==== Unity ====
 
     void Start()
     {
-        totalMoney = startingMoney;
-        GenerateWaterSource();
-        GenerateResourceNodes(5);
+        if (NetworkManager.Singleton == null)
+        {
+            InitializeWorld(UnityEngine.Random.Range(1, int.MaxValue));
+            sharedMoney.Value = startingMoney;
+        }
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        if (IsServer)
+        {
+            if (worldSeed.Value == 0)
+                worldSeed.Value = UnityEngine.Random.Range(1, int.MaxValue);
+
+            sharedMoney.Value = startingMoney;
+            InitializeWorld(worldSeed.Value);
+        }
+        else
+        {
+            worldSeed.OnValueChanged += OnWorldSeedChanged;
+            if (worldSeed.Value != 0)
+                InitializeWorld(worldSeed.Value);
+        }
+    }
+
+    void OnWorldSeedChanged(int previous, int current)
+    {
+        if (current == 0) return;
+        InitializeWorld(current);
+    }
+
+    void InitializeWorld(int seed)
+    {
+        if (worldInitialized) return;
+        worldInitialized = true;
+
+        Buildings = new Building[GridSizeX, GridSizeY];
+        nodes = new Node[GridSizeX, GridSizeY];
+        waterSources = new bool[GridSizeX, GridSizeY];
+
+        var rng = new System.Random(seed);
+        GenerateWaterSource(rng);
+        GenerateResourceNodes(rng, resourceNodeCount);
     }
 
     void Update()
@@ -1427,7 +1475,7 @@ public class Grid_Script : NetworkBehaviour
         {
             if (selected != null && selected.IsRotatable())
             {
-                selected.RotateClockwise();
+                RequestRotate(selected.x, selected.y);
             }
             else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingAlloyFurnace || placingForge || placingCraftingTable || placingWaterPump || placingStraightPipe || placingCornerPipe || placingCrossPipe || placingOreWasher)
             {
@@ -1478,19 +1526,19 @@ public class Grid_Script : NetworkBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (placingConveyor) { TryPlaceConveyor(cell.x, cell.y); return; }
-            if (placingFurnace) { TryPlaceFurnace(cell.x, cell.y); return; }
-            if (placingAlloyFurnace) { TryPlaceAlloyFurnace(cell.x, cell.y); return; }
-            if (placingForge) { TryPlaceForge(cell.x, cell.y); return; }
-            if (placingSplitter) { TryPlaceSplitter(cell.x, cell.y); return; }
-            if (placingMiner) { TryPlaceMiner(cell.x, cell.y); return; }
-            if (placingSeller) { TryPlaceSeller(cell.x, cell.y); return; }
-            if (placingCraftingTable) { TryPlaceCraftingTable(cell.x, cell.y); return; }
-            if (placingWaterPump) { TryPlaceWaterPump(cell.x, cell.y); return; }
-            if (placingStraightPipe) { TryPlaceStraightPipe(cell.x, cell.y); return; }
-            if (placingCornerPipe) { TryPlaceCornerPipe(cell.x, cell.y); return; }
-            if (placingCrossPipe) { TryPlaceCrossPipe(cell.x, cell.y); return; }
-            if (placingOreWasher) { TryPlaceOreWasher(cell.x, cell.y); return; }
+            if (placingConveyor) { RequestPlace(BuildableType.Conveyor, cell.x, cell.y, placementDir); return; }
+            if (placingFurnace) { RequestPlace(BuildableType.Furnace, cell.x, cell.y, placementDir); return; }
+            if (placingAlloyFurnace) { RequestPlace(BuildableType.AlloyFurnace, cell.x, cell.y, placementDir); return; }
+            if (placingForge) { RequestPlace(BuildableType.Forge, cell.x, cell.y, placementDir); return; }
+            if (placingSplitter) { RequestPlace(BuildableType.Splitter3, cell.x, cell.y, placementDir); return; }
+            if (placingMiner) { RequestPlace(BuildableType.Miner, cell.x, cell.y, placementDir); return; }
+            if (placingSeller) { RequestPlace(BuildableType.Seller, cell.x, cell.y, Dir.N); return; }
+            if (placingCraftingTable) { RequestPlace(BuildableType.CraftingTable, cell.x, cell.y, placementDir); return; }
+            if (placingWaterPump) { RequestPlace(BuildableType.WaterPump, cell.x, cell.y, placementDir); return; }
+            if (placingStraightPipe) { RequestPlace(BuildableType.StraightPipe, cell.x, cell.y, placementDir); return; }
+            if (placingCornerPipe) { RequestPlace(BuildableType.CornerPipe, cell.x, cell.y, placementDir); return; }
+            if (placingCrossPipe) { RequestPlace(BuildableType.CrossPipe, cell.x, cell.y, placementDir); return; }
+            if (placingOreWasher) { RequestPlace(BuildableType.OreWasher, cell.x, cell.y, placementDir); return; }
             if (placingItemOnConveyor) { TryAssignItemToConveyor(cell.x, cell.y); return; }
 
             SelectBuildingAt(cell.x, cell.y);
@@ -1501,6 +1549,12 @@ public class Grid_Script : NetworkBehaviour
         {
             if ((selected.x != cell.x || selected.y != cell.y) && InBounds(cell.x, cell.y))
             {
+                if (!IsServer)
+                {
+                    pendingDragTarget = cell;
+                    return;
+                }
+
                 if (Buildings[cell.x, cell.y] == null)
                 {
                     if (IsWaterSourceCell(cell.x, cell.y) && !(selected is WaterPump)) return;
@@ -1513,10 +1567,175 @@ public class Grid_Script : NetworkBehaviour
             }
         }
 
-        if (Input.GetMouseButtonUp(0)) dragging = false;
+        if (Input.GetMouseButtonUp(0))
+        {
+            if (!IsServer && dragging && selected != null && pendingDragTarget.HasValue)
+            {
+                var target = pendingDragTarget.Value;
+                RequestMoveBuildingServerRpc(selected.x, selected.y, target.x, target.y);
+            }
+
+            pendingDragTarget = null;
+            dragging = false;
+        }
     }
 
     // ==== Platzierung ====
+
+    enum BuildableType
+    {
+        Conveyor,
+        Furnace,
+        AlloyFurnace,
+        Forge,
+        Splitter3,
+        Miner,
+        Seller,
+        CraftingTable,
+        WaterPump,
+        StraightPipe,
+        CornerPipe,
+        CrossPipe,
+        OreWasher
+    }
+
+    void RequestPlace(BuildableType type, int x, int y, Dir dir)
+    {
+        if (IsServer)
+        {
+            if (TryPlaceBuilding(type, x, y, dir, true))
+            {
+                PlaceBuildingClientRpc(type, x, y, dir);
+            }
+            return;
+        }
+
+        RequestPlaceBuildingServerRpc(type, x, y, dir);
+    }
+
+    void RequestRotate(int x, int y)
+    {
+        if (IsServer)
+        {
+            if (TryRotateBuildingAt(x, y))
+            {
+                RotateBuildingClientRpc(x, y);
+            }
+            return;
+        }
+
+        RequestRotateBuildingServerRpc(x, y);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestRotateBuildingServerRpc(int x, int y)
+    {
+        if (TryRotateBuildingAt(x, y))
+        {
+            RotateBuildingClientRpc(x, y);
+        }
+    }
+
+    [ClientRpc]
+    void RotateBuildingClientRpc(int x, int y)
+    {
+        if (IsServer) return;
+        TryRotateBuildingAt(x, y);
+    }
+
+    bool TryRotateBuildingAt(int x, int y)
+    {
+        if (!InBounds(x, y)) return false;
+        var building = Buildings[x, y];
+        if (building == null || !building.IsRotatable()) return false;
+        building.RotateClockwise();
+        return true;
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestPlaceBuildingServerRpc(BuildableType type, int x, int y, Dir dir)
+    {
+        if (TryPlaceBuilding(type, x, y, dir, true))
+        {
+            PlaceBuildingClientRpc(type, x, y, dir);
+        }
+    }
+
+    [ClientRpc]
+    void PlaceBuildingClientRpc(BuildableType type, int x, int y, Dir dir)
+    {
+        if (IsServer) return;
+        TryPlaceBuilding(type, x, y, dir, false);
+    }
+
+    bool TryPlaceBuilding(BuildableType type, int x, int y, Dir dir, bool spendMoney)
+    {
+        switch (type)
+        {
+            case BuildableType.Conveyor:
+                return TryPlaceConveyor(x, y, dir, spendMoney);
+            case BuildableType.Furnace:
+                return TryPlaceFurnace(x, y, dir, spendMoney);
+            case BuildableType.AlloyFurnace:
+                return TryPlaceAlloyFurnace(x, y, dir, spendMoney);
+            case BuildableType.Forge:
+                return TryPlaceForge(x, y, dir, spendMoney);
+            case BuildableType.Splitter3:
+                return TryPlaceSplitter(x, y, dir, spendMoney);
+            case BuildableType.Miner:
+                return TryPlaceMiner(x, y, dir, spendMoney);
+            case BuildableType.Seller:
+                return TryPlaceSeller(x, y, spendMoney);
+            case BuildableType.CraftingTable:
+                return TryPlaceCraftingTable(x, y, dir, spendMoney);
+            case BuildableType.WaterPump:
+                return TryPlaceWaterPump(x, y, dir, spendMoney);
+            case BuildableType.StraightPipe:
+                return TryPlaceStraightPipe(x, y, dir, spendMoney);
+            case BuildableType.CornerPipe:
+                return TryPlaceCornerPipe(x, y, dir, spendMoney);
+            case BuildableType.CrossPipe:
+                return TryPlaceCrossPipe(x, y, dir, spendMoney);
+            case BuildableType.OreWasher:
+                return TryPlaceOreWasher(x, y, dir, spendMoney);
+            default:
+                return false;
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestMoveBuildingServerRpc(int fromX, int fromY, int toX, int toY)
+    {
+        if (TryMoveBuilding(fromX, fromY, toX, toY))
+        {
+            MoveBuildingClientRpc(fromX, fromY, toX, toY);
+        }
+    }
+
+    [ClientRpc]
+    void MoveBuildingClientRpc(int fromX, int fromY, int toX, int toY)
+    {
+        if (IsServer) return;
+        TryMoveBuilding(fromX, fromY, toX, toY);
+    }
+
+    bool TryMoveBuilding(int fromX, int fromY, int toX, int toY)
+    {
+        if (!InBounds(fromX, fromY) || !InBounds(toX, toY)) return false;
+        var building = Buildings[fromX, fromY];
+        if (building == null) return false;
+        if (Buildings[toX, toY] != null) return false;
+
+        if (IsWaterSourceCell(toX, toY) && !(building is WaterPump)) return false;
+        if (building is WaterPump && !IsWaterSourceCell(toX, toY)) return false;
+
+        Buildings[fromX, fromY] = null;
+        building.x = toX;
+        building.y = toY;
+        Buildings[toX, toY] = building;
+        building.OnMoved();
+        return true;
+    }
 
     float CurrentPlacementCost()
     {
@@ -1642,38 +1861,45 @@ public class Grid_Script : NetworkBehaviour
 
     void TryPlaceConveyor(int x, int y)
     {
+        TryPlaceConveyor(x, y, placementDir, true);
+    }
+
+    bool TryPlaceConveyor(int x, int y, Dir dir, bool spendMoney)
+    {
         if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
 
-        if (!TrySpendMoney(conveyorCost)) return;
+        if (spendMoney && !TrySpendMoney(conveyorCost)) return false;
 
-        Dir d = placementDir;
-
-        GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
+        GameObject go = Instantiate(conveyorPrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(dir)));
 
         Conveyor conv = new Conveyor();
         conv.x = x; conv.y = y;
-        conv.rot = d;
+        conv.rot = dir;
         conv.go = go;
         conv.grid = this;
 
         Buildings[x, y] = conv;
         conv.Init();
+        return true;
     }
 
     void TryPlaceFurnace(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (furnacePrefab == null) return;
+        TryPlaceFurnace(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(furnaceCost)) return;
+    bool TryPlaceFurnace(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (furnacePrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(furnaceCost)) return false;
 
         GameObject go = Instantiate(furnacePrefab, CellCenter(x, y), Quaternion.identity);
 
         Furnace f = new Furnace();
         f.x = x; f.y = y;
-        f.rot = d;
+        f.rot = dir;
         f.go = go;
         f.offSprite = furnaceOffSprite;
         f.onSprite = furnaceOnSprite;
@@ -1681,96 +1907,118 @@ public class Grid_Script : NetworkBehaviour
 
         Buildings[x, y] = f;
         f.OnMoved();
+        return true;
     }
 
     void TryPlaceAlloyFurnace(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (alloyFurnacePrefab == null && furnacePrefab == null) return;
+        TryPlaceAlloyFurnace(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(alloyFurnaceCost)) return;
+    bool TryPlaceAlloyFurnace(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (alloyFurnacePrefab == null && furnacePrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(alloyFurnaceCost)) return false;
 
         GameObject prefab = alloyFurnacePrefab != null ? alloyFurnacePrefab : furnacePrefab;
         GameObject go = Instantiate(prefab, CellCenter(x, y), Quaternion.identity);
 
         AlloyFurnace f = new AlloyFurnace();
         f.x = x; f.y = y;
-        f.rot = d;
+        f.rot = dir;
         f.go = go;
         f.grid = this;
 
         Buildings[x, y] = f;
         f.OnMoved();
+        return true;
     }
 
     void TryPlaceForge(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (forgePrefab == null) return;
+        TryPlaceForge(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(forgeCost)) return;
+    bool TryPlaceForge(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (forgePrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(forgeCost)) return false;
 
         GameObject go = Instantiate(forgePrefab, CellCenter(x, y), Quaternion.identity);
 
         Forge f = new Forge();
         f.x = x; f.y = y;
-        f.rot = d;
+        f.rot = dir;
         f.go = go;
         f.grid = this;
 
         Buildings[x, y] = f;
         f.OnMoved();
+        return true;
     }
 
     void TryPlaceCraftingTable(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (craftingTablePrefab == null) return;
+        TryPlaceCraftingTable(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(craftingTableCost)) return;
+    bool TryPlaceCraftingTable(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (craftingTablePrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(craftingTableCost)) return false;
 
         GameObject go = Instantiate(craftingTablePrefab, CellCenter(x, y), Quaternion.identity);
 
         CraftingTable table = new CraftingTable();
         table.x = x; table.y = y;
-        table.rot = d;
+        table.rot = dir;
         table.go = go;
         table.grid = this;
 
         Buildings[x, y] = table;
         table.OnMoved();
+        return true;
     }
 
     void TryPlaceSplitter(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        TryPlaceSplitter(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(splitterCost)) return;
+    bool TryPlaceSplitter(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(splitterCost)) return false;
 
-        GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(placementDir)));
+        GameObject go = Instantiate(splitter3Prefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(dir)));
 
         Splitter3 sp = new Splitter3();
         sp.x = x; sp.y = y;
-        sp.rot = d;
+        sp.rot = dir;
         sp.go = go;
 
         Buildings[x, y] = sp;
         sp.OnMoved();
+        return true;
     }
 
     void TryPlaceSeller(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        TryPlaceSeller(x, y, true);
+    }
 
-        if (!TrySpendMoney(sellerCost)) return;
+    bool TryPlaceSeller(int x, int y, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+
+        if (spendMoney && !TrySpendMoney(sellerCost)) return false;
 
         GameObject go = Instantiate(sellerPrefab, CellCenter(x, y), Quaternion.identity);
 
@@ -1782,39 +2030,47 @@ public class Grid_Script : NetworkBehaviour
 
         Buildings[x, y] = s;
         s.OnMoved();
+        return true;
     }
 
     void TryPlaceMiner(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (nodes[x, y] == null) return;
+        TryPlaceMiner(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(minerCost)) return;
+    bool TryPlaceMiner(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (nodes[x, y] == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(minerCost)) return false;
 
         GameObject go = Instantiate(minerPrefab, CellCenter(x, y), Quaternion.identity);
 
         Miner m = new Miner();
         m.x = x; m.y = y;
-        m.rot = d;
+        m.rot = dir;
         m.go = go;
         m.node = nodes[x, y];
         m.grid = this;
 
         Buildings[x, y] = m;
         m.OnMoved();
+        return true;
     }
 
     void TryPlaceWaterPump(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
-        if (!IsWaterSourceCell(x, y)) return;
-        if (waterPumpPrefab == null) return;
+        TryPlaceWaterPump(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(waterPumpCost)) return;
+    bool TryPlaceWaterPump(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return false;
+        if (!IsWaterSourceCell(x, y)) return false;
+        if (waterPumpPrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(waterPumpCost)) return false;
 
         GameObject go = Instantiate(waterPumpPrefab, CellCenter(x, y), Quaternion.identity);
         var sr = go.GetComponent<SpriteRenderer>();
@@ -1822,91 +2078,111 @@ public class Grid_Script : NetworkBehaviour
 
         WaterPump pump = new WaterPump();
         pump.x = x; pump.y = y;
-        pump.rot = d;
+        pump.rot = dir;
         pump.go = go;
         pump.grid = this;
         pump.isOnWaterSource = true;
 
         Buildings[x, y] = pump;
         pump.OnMoved();
+        return true;
     }
 
     void TryPlaceStraightPipe(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (straightPipePrefab == null) return;
-        if (!TrySpendMoney(straightPipeCost)) return;
+        TryPlaceStraightPipe(x, y, placementDir, true);
+    }
 
-        Dir d = placementDir;
-        GameObject go = Instantiate(straightPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+    bool TryPlaceStraightPipe(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (straightPipePrefab == null) return false;
+        if (spendMoney && !TrySpendMoney(straightPipeCost)) return false;
+
+        GameObject go = Instantiate(straightPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(dir)));
 
         StraightPipe pipe = new StraightPipe();
         pipe.x = x; pipe.y = y;
-        pipe.rot = d;
+        pipe.rot = dir;
         pipe.go = go;
         pipe.grid = this;
 
         Buildings[x, y] = pipe;
         pipe.OnMoved();
+        return true;
     }
 
     void TryPlaceCornerPipe(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (cornerPipePrefab == null) return;
-        if (!TrySpendMoney(cornerPipeCost)) return;
+        TryPlaceCornerPipe(x, y, placementDir, true);
+    }
 
-        Dir d = placementDir;
-        GameObject go = Instantiate(cornerPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+    bool TryPlaceCornerPipe(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (cornerPipePrefab == null) return false;
+        if (spendMoney && !TrySpendMoney(cornerPipeCost)) return false;
+
+        GameObject go = Instantiate(cornerPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(dir)));
 
         CornerPipe pipe = new CornerPipe();
         pipe.x = x; pipe.y = y;
-        pipe.rot = d;
+        pipe.rot = dir;
         pipe.go = go;
         pipe.grid = this;
 
         Buildings[x, y] = pipe;
         pipe.OnMoved();
+        return true;
     }
 
     void TryPlaceCrossPipe(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (crossPipePrefab == null) return;
-        if (!TrySpendMoney(crossPipeCost)) return;
+        TryPlaceCrossPipe(x, y, placementDir, true);
+    }
 
-        Dir d = placementDir;
-        GameObject go = Instantiate(crossPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+    bool TryPlaceCrossPipe(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (crossPipePrefab == null) return false;
+        if (spendMoney && !TrySpendMoney(crossPipeCost)) return false;
+
+        GameObject go = Instantiate(crossPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(dir)));
 
         CrossPipe pipe = new CrossPipe();
         pipe.x = x; pipe.y = y;
-        pipe.rot = d;
+        pipe.rot = dir;
         pipe.go = go;
         pipe.grid = this;
 
         Buildings[x, y] = pipe;
         pipe.OnMoved();
+        return true;
     }
 
     void TryPlaceOreWasher(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
-        if (oreWasherPrefab == null) return;
+        TryPlaceOreWasher(x, y, placementDir, true);
+    }
 
-        if (!TrySpendMoney(oreWasherCost)) return;
+    bool TryPlaceOreWasher(int x, int y, Dir dir, bool spendMoney)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
+        if (oreWasherPrefab == null) return false;
 
-        Dir d = placementDir;
+        if (spendMoney && !TrySpendMoney(oreWasherCost)) return false;
 
         GameObject go = Instantiate(oreWasherPrefab, CellCenter(x, y), Quaternion.identity);
 
         OreWasher washer = new OreWasher();
         washer.x = x; washer.y = y;
-        washer.rot = d;
+        washer.rot = dir;
         washer.go = go;
         washer.grid = this;
 
         Buildings[x, y] = washer;
         washer.OnMoved();
+        return true;
     }
 
     void TryAssignItemToConveyor(int x, int y)
@@ -1962,30 +2238,67 @@ public class Grid_Script : NetworkBehaviour
     {
         if (selected == null) return;
 
-        float refundAmount = GetRefundAmount(selected);
+        if (IsServer)
+        {
+            if (DeleteBuildingAt(selected.x, selected.y, true))
+            {
+                DeleteBuildingClientRpc(selected.x, selected.y);
+            }
+        }
+        else
+        {
+            RequestDeleteBuildingServerRpc(selected.x, selected.y);
+        }
+    }
 
-        if (selected is CraftingTable crafting)
+    [ServerRpc(RequireOwnership = false)]
+    void RequestDeleteBuildingServerRpc(int x, int y)
+    {
+        if (DeleteBuildingAt(x, y, true))
+        {
+            DeleteBuildingClientRpc(x, y);
+        }
+    }
+
+    [ClientRpc]
+    void DeleteBuildingClientRpc(int x, int y)
+    {
+        if (IsServer) return;
+        DeleteBuildingAt(x, y, false);
+    }
+
+    bool DeleteBuildingAt(int x, int y, bool refund)
+    {
+        if (!InBounds(x, y)) return false;
+        var building = Buildings[x, y];
+        if (building == null) return false;
+
+        if (building is CraftingTable crafting)
         {
             crafting.ClearContents();
         }
-        else if (selected is AlloyFurnace alloy)
+        else if (building is AlloyFurnace alloy)
         {
             alloy.ClearContents();
         }
-        else if (selected.item != null && selected.item.go != null)
+        else if (building.item != null && building.item.go != null)
         {
-            Destroy(selected.item.go);
-            selected.item = null;
+            Destroy(building.item.go);
+            building.item = null;
         }
 
-        if (selected.go != null) Destroy(selected.go);
+        if (building.go != null) Destroy(building.go);
 
-        if (InBounds(selected.x, selected.y) && Buildings[selected.x, selected.y] == selected)
-            Buildings[selected.x, selected.y] = null;
+        Buildings[x, y] = null;
 
-        if (refundAmount > 0f) AddMoney(refundAmount);
+        if (refund)
+        {
+            float refundAmount = GetRefundAmount(building);
+            if (refundAmount > 0f) AddMoney(refundAmount);
+        }
 
-        selected = null;
+        if (selected == building) ClearSelection();
+        return true;
     }
 
     float GetRefundAmount(Building b)
@@ -2026,9 +2339,8 @@ public class Grid_Script : NetworkBehaviour
         return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0);
     }
 
-    void GenerateResourceNodes(int count)
+    void GenerateResourceNodes(System.Random rng, int count)
     {
-        System.Random rng = new System.Random();
         int attempts = 0;
         int placed = 0;
         while (placed < count && attempts < 200)
@@ -2053,9 +2365,8 @@ public class Grid_Script : NetworkBehaviour
         }
     }
 
-    void GenerateWaterSource()
+    void GenerateWaterSource(System.Random rng)
     {
-        System.Random rng = new System.Random();
         int attempts = 0;
         while (attempts < 200)
         {
@@ -2433,18 +2744,20 @@ public class Grid_Script : NetworkBehaviour
 
     public void AddMoney(float amount)
     {
-        totalMoney += amount;
+        if (!IsServer) return;
+        sharedMoney.Value += amount;
     }
 
     bool CanAfford(float amount)
     {
-        return totalMoney >= amount;
+        return sharedMoney.Value >= amount;
     }
 
     bool TrySpendMoney(float amount)
     {
+        if (!IsServer) return false;
         if (!CanAfford(amount)) return false;
-        totalMoney -= amount;
+        sharedMoney.Value -= amount;
         return true;
     }
 
@@ -2583,7 +2896,7 @@ public class Grid_Script : NetworkBehaviour
         moneyStyle.normal.textColor = Color.green;
         moneyStyle.alignment = TextAnchor.MiddleRight;
         moneyStyle.fontSize = 18;
-        GUI.Label(new Rect(Screen.width - 180, 10, 170, 30), "€ " + totalMoney.ToString("F0"), moneyStyle);
+        GUI.Label(new Rect(Screen.width - 180, 10, 170, 30), "€ " + sharedMoney.Value.ToString("F0"), moneyStyle);
 
         DrawSelectedBuildingUI();
 
