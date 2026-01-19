@@ -306,6 +306,8 @@ public class Grid_Script : MonoBehaviour
                 if (ingot != null)
                 {
                     ingot.isWashed = item.isWashed;
+                    ingot.value = item.value + 1;
+                    if (grid != null) grid.UpdateItemValueLabel(ingot);
                     if (grid != null) grid.UpdateWashedIndicator(ingot);
                     ingot.go.transform.position = Center();
                     item = ingot;
@@ -2415,7 +2417,14 @@ public class Grid_Script : MonoBehaviour
             lineRenderer.SetPosition(3, new Vector3(-0.12f, -0.02f, 0f));
         }
 
-        arrow.transform.localPosition = new Vector3(0f, 0f, -0.05f);
+        var spriteRenderer = arrow.GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.sortingOrder = 30;
+            spriteRenderer.sortingLayerName = "Default";
+        }
+
+        arrow.transform.localPosition = new Vector3(0f, 0f, -0.1f);
         arrow.transform.localRotation = Quaternion.Euler(0, 0, DirToAngle(dir));
         arrow.name = "DirectionArrow";
     }
