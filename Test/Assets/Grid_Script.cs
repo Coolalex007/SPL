@@ -300,13 +300,20 @@ public class Grid_Script : MonoBehaviour
             t += dt;
             if (t >= processTime)
             {
+                int inputValue = item.value;
+                bool inputWashed = item.isWashed;
                 Item ingot = grid != null ? grid.CreateItemFromResource(item.resource, ItemForm.Ingot) : null;
                 if (item.go != null) UnityEngine.Object.Destroy(item.go);
 
                 if (ingot != null)
                 {
-                    ingot.isWashed = item.isWashed;
-                    if (grid != null) grid.UpdateWashedIndicator(ingot);
+                    ingot.isWashed = inputWashed;
+                    ingot.value = inputValue + 1;
+                    if (grid != null)
+                    {
+                        grid.UpdateItemValueLabel(ingot);
+                        grid.UpdateWashedIndicator(ingot);
+                    }
                     ingot.go.transform.position = Center();
                     item = ingot;
                 }
@@ -710,6 +717,10 @@ public class Grid_Script : MonoBehaviour
         {
             if (grid == null || go == null) return;
             grid.UpdateDirectionArrow(ref directionArrow, go.transform, rot);
+            if (directionArrow != null)
+            {
+                directionArrow.transform.localPosition = new Vector3(0f, 0.18f, -0.05f);
+            }
         }
 
         public override bool CanAccept(Item i) { return false; }
