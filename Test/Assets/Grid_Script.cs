@@ -1,9 +1,11 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
+using Unity.Netcode;
 
-public class Grid_Script : MonoBehaviour
+public class Grid_Script : NetworkBehaviour
 {
+
     // ==== Grid ====
     public static int GridSizeX = 26;
     public static int GridSizeY = 15;
