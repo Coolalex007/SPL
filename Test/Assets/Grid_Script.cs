@@ -29,6 +29,13 @@ public class Grid_Script : MonoBehaviour
     public GameObject reinforcedPlatePrefab;
     public GameObject craftingTablePrefab;
     public GameObject directionArrowPrefab;
+    public GameObject waterSourcePrefab;
+    public GameObject waterPumpPrefab;
+    public GameObject straightPipePrefab;
+    public GameObject cornerPipePrefab;
+    public GameObject crossPipePrefab;
+    public GameObject oreWasherPrefab;
+    public Sprite washedStarSprite;
 
     Dictionary<int, Sprite> alloyHalfLeftCache = new Dictionary<int, Sprite>();
     Dictionary<int, Sprite> alloyHalfRightCache = new Dictionary<int, Sprite>();
@@ -49,6 +56,11 @@ public class Grid_Script : MonoBehaviour
     bool placingForge;
     bool placingAlloyFurnace;
     bool placingCraftingTable;
+    bool placingWaterPump;
+    bool placingStraightPipe;
+    bool placingCornerPipe;
+    bool placingCrossPipe;
+    bool placingOreWasher;
     Dir placementDir = Dir.N;
 
     // ==== Debug-Item auf Conveyor setzen ====
@@ -89,6 +101,7 @@ public class Grid_Script : MonoBehaviour
         public GameObject go;
         public TextMesh valueLabel;
         public bool isAlloy;
+        public bool isWashed;
 
         public Item(string id, ResourceType resource, int value, ItemForm form, GameObject go)
         {
@@ -113,6 +126,7 @@ public class Grid_Script : MonoBehaviour
         public int x, y;
         public GameObject go;
         public Grid_Script grid;
+        public bool hasWater;
 
         protected GameObject directionArrow;
 
@@ -122,6 +136,8 @@ public class Grid_Script : MonoBehaviour
         public virtual void OnMoved() { if (go != null) go.transform.position = Center(); }
         public virtual bool IsRotatable() { return false; }
         public virtual void RotateClockwise() { }
+        public virtual bool IsWaterPassThrough() { return false; }
+        public virtual List<Dir> GetWaterConnections() { return new List<Dir>(); }
         public Vector3 Center() { return new Vector3(x * CELL_W + CELL_W * 0.5f, y * CELL_H + CELL_H * 0.5f, 0); }
     }
 
@@ -289,6 +305,8 @@ public class Grid_Script : MonoBehaviour
 
                 if (ingot != null)
                 {
+                    ingot.isWashed = item.isWashed;
+                    if (grid != null) grid.UpdateWashedIndicator(ingot);
                     ingot.go.transform.position = Center();
                     item = ingot;
                 }
@@ -411,6 +429,7 @@ public class Grid_Script : MonoBehaviour
             inputs.Clear();
 
             int combinedValue = first.value + second.value;
+            bool washed = first.isWashed || second.isWashed;
             ResourceType primary = first.resource;
             ResourceType secondary = second.resource;
 
@@ -420,6 +439,8 @@ public class Grid_Script : MonoBehaviour
             Item alloy = grid != null ? grid.CreateAlloyItem(primary, secondary, combinedValue) : null;
             if (alloy != null)
             {
+                alloy.isWashed = washed;
+                if (grid != null) grid.UpdateWashedIndicator(alloy);
                 alloy.go.transform.position = Center();
                 item = alloy;
             }
@@ -430,6 +451,7 @@ public class Grid_Script : MonoBehaviour
                 Item fallback = new Item(primary.ToString() + "-" + secondary.ToString() + " Alloy", primary, combinedValue, ItemForm.Ingot, go);
                 fallback.isAlloy = true;
                 fallback.secondaryResource = secondary;
+                fallback.isWashed = washed;
                 item = fallback;
                 if (grid != null)
                 {
@@ -605,6 +627,7 @@ public class Grid_Script : MonoBehaviour
 
             if (result != null)
             {
+                result.isWashed = item.isWashed;
                 result.value = item.value + valueDelta;
                 result.id = itemIsAlloy
                     ? item.resource.ToString() + "-" + item.secondaryResource.Value.ToString() + " Alloy" + suffix
@@ -614,6 +637,7 @@ public class Grid_Script : MonoBehaviour
                     grid.ColorizeItem(result);
                     grid.UpdateItemValueLabel(result);
                 }
+                if (grid != null) grid.UpdateWashedIndicator(result);
                 result.go.transform.position = Center();
                 item = result;
             }
@@ -673,6 +697,231 @@ public class Grid_Script : MonoBehaviour
                 case Dir.E: rot = Dir.S; break;
                 case Dir.S: rot = Dir.W; break;
                 case Dir.W: rot = Dir.N; break;
+            }
+            UpdateDirection();
+        }
+    }
+
+    public class WaterPump : Building
+    {
+        public bool isOnWaterSource;
+
+        void UpdateDirection()
+        {
+            if (grid == null || go == null) return;
+            grid.UpdateDirectionArrow(ref directionArrow, go.transform, rot);
+        }
+
+        public override bool CanAccept(Item i) { return false; }
+
+        public override bool IsRotatable() { return true; }
+
+        public override void RotateClockwise()
+        {
+            switch (rot)
+            {
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
+            }
+            UpdateDirection();
+        }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            UpdateDirection();
+        }
+
+        public override bool IsWaterPassThrough() { return true; }
+
+        public override List<Dir> GetWaterConnections()
+        {
+            return isOnWaterSource ? new List<Dir> { rot } : new List<Dir>();
+        }
+    }
+
+    public abstract class PipeBase : Building
+    {
+        public override bool CanAccept(Item i) { return false; }
+        public override bool IsRotatable() { return true; }
+        public override bool IsWaterPassThrough() { return true; }
+
+        public override void RotateClockwise()
+        {
+            switch (rot)
+            {
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
+            }
+            if (go != null) go.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(rot));
+        }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            if (go != null) go.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(rot));
+        }
+    }
+
+    public class StraightPipe : PipeBase
+    {
+        public override List<Dir> GetWaterConnections()
+        {
+            return (rot == Dir.N || rot == Dir.S)
+                ? new List<Dir> { Dir.N, Dir.S }
+                : new List<Dir> { Dir.E, Dir.W };
+        }
+    }
+
+    public class CornerPipe : PipeBase
+    {
+        public override List<Dir> GetWaterConnections()
+        {
+            switch (rot)
+            {
+                case Dir.N: return new List<Dir> { Dir.N, Dir.E };
+                case Dir.E: return new List<Dir> { Dir.E, Dir.S };
+                case Dir.S: return new List<Dir> { Dir.S, Dir.W };
+                case Dir.W: return new List<Dir> { Dir.W, Dir.N };
+                default: return new List<Dir> { Dir.N, Dir.E };
+            }
+        }
+    }
+
+    public class CrossPipe : PipeBase
+    {
+        public override List<Dir> GetWaterConnections()
+        {
+            return new List<Dir> { Dir.N, Dir.E, Dir.S, Dir.W };
+        }
+
+        public override void RotateClockwise()
+        {
+        }
+
+        public override bool IsRotatable() { return false; }
+    }
+
+    public class OreWasher : Building
+    {
+        public float washTime = 1.5f;
+        float t;
+
+        void UpdateDirection()
+        {
+            if (grid == null || go == null) return;
+            grid.UpdateDirectionArrow(ref directionArrow, go.transform, rot);
+        }
+
+        public override bool CanAccept(Item i)
+        {
+            if (i == null) return false;
+            if (i.form != ItemForm.Ore) return false;
+            if (i.isWashed) return false;
+            return base.CanAccept(i);
+        }
+
+        public override bool Accept(Item i)
+        {
+            if (!base.Accept(i)) return false;
+            t = 0f;
+            if (i.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                i.go.transform.position = p;
+                var sr = i.go.GetComponent<SpriteRenderer>();
+                if (sr != null) sr.sortingOrder = 10;
+            }
+            UpdateDirection();
+            return true;
+        }
+
+        public override void Tick(float dt)
+        {
+            if (item == null) return;
+            if (item.isWashed)
+            {
+                AttemptOutput();
+                return;
+            }
+            if (!hasWater) return;
+
+            t += dt;
+            if (t >= washTime)
+            {
+                WashItem();
+                AttemptOutput();
+                t = 0f;
+            }
+        }
+
+        void WashItem()
+        {
+            if (item == null) return;
+            if (item.isWashed) return;
+            item.isWashed = true;
+            item.value = Mathf.CeilToInt(item.value * 1.5f);
+            if (grid != null)
+            {
+                grid.UpdateItemValueLabel(item);
+                grid.UpdateWashedIndicator(item);
+            }
+        }
+
+        void AttemptOutput()
+        {
+            if (item == null) return;
+
+            var step = StepForDir(rot);
+            int tx = x + step.dx;
+            int ty = y + step.dy;
+            if (!InBounds(tx, ty)) return;
+
+            var nb = Buildings[tx, ty];
+            if (nb != null && nb.CanAccept(item))
+            {
+                nb.Accept(item);
+                item = null;
+            }
+            else if (item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
+            }
+        }
+
+        public override bool IsWaterPassThrough() { return false; }
+
+        public override List<Dir> GetWaterConnections()
+        {
+            return new List<Dir> { Dir.N, Dir.E, Dir.S, Dir.W };
+        }
+
+        public override bool IsRotatable() { return true; }
+
+        public override void RotateClockwise()
+        {
+            switch (rot)
+            {
+                case Dir.N: rot = Dir.E; break;
+                case Dir.E: rot = Dir.S; break;
+                case Dir.S: rot = Dir.W; break;
+                case Dir.W: rot = Dir.N; break;
+            }
+            UpdateDirection();
+        }
+
+        public override void OnMoved()
+        {
+            base.OnMoved();
+            if (item != null && item.go != null)
+            {
+                Vector3 p = Center(); p.z = ITEM_Z;
+                item.go.transform.position = p;
             }
             UpdateDirection();
         }
@@ -948,6 +1197,7 @@ public class Grid_Script : MonoBehaviour
 
             int inputValue = boltA.value + boltB.value + plate.value;
             int outputValue = inputValue * 2;
+            bool washed = boltA.isWashed || boltB.isWashed || plate.isWashed;
 
             ConsumeItem(boltA);
             ConsumeItem(boltB);
@@ -961,6 +1211,7 @@ public class Grid_Script : MonoBehaviour
             {
                 reinforced.value = outputValue;
                 reinforced.id = reinforcedId;
+                reinforced.isWashed = washed;
                 if (inputsAlloy && secondaryRes.HasValue)
                 {
                     reinforced.isAlloy = true;
@@ -968,6 +1219,7 @@ public class Grid_Script : MonoBehaviour
                 }
                 if (grid != null) grid.UpdateItemValueLabel(reinforced);
                 if (grid != null) grid.ColorizeItem(reinforced);
+                if (grid != null) grid.UpdateWashedIndicator(reinforced);
                 reinforced.go.transform.position = Center();
                 item = reinforced;
             }
@@ -978,6 +1230,7 @@ public class Grid_Script : MonoBehaviour
                 Item fallback = new Item(reinforcedId, res, outputValue, ItemForm.ReinforcedPlate, go);
                 fallback.isAlloy = inputsAlloy;
                 fallback.secondaryResource = secondaryRes;
+                fallback.isWashed = washed;
                 item = fallback;
                 if (grid != null)
                 {
@@ -1092,6 +1345,7 @@ public class Grid_Script : MonoBehaviour
     }
 
     Node[,] nodes = new Node[GridSizeX, GridSizeY];
+    bool[,] waterSources = new bool[GridSizeX, GridSizeY];
 
     [Header("Economy")]
     public float startingMoney = 200f;
@@ -1103,6 +1357,11 @@ public class Grid_Script : MonoBehaviour
     public float minerCost = 60f;
     public float sellerCost = 40f;
     public float craftingTableCost = 90f;
+    public float waterPumpCost = 50f;
+    public float straightPipeCost = 10f;
+    public float cornerPipeCost = 12f;
+    public float crossPipeCost = 15f;
+    public float oreWasherCost = 120f;
 
     float totalMoney;
 
@@ -1111,6 +1370,7 @@ public class Grid_Script : MonoBehaviour
     void Start()
     {
         totalMoney = startingMoney;
+        GenerateWaterSource();
         GenerateResourceNodes(5);
     }
 
@@ -1118,6 +1378,8 @@ public class Grid_Script : MonoBehaviour
     {
         HandleHotkeys();
         HandleMouse();
+
+        UpdateWaterNetwork();
 
         if (placingConveyor) UpdateGhost(conveyorPrefab);
         if (placingFurnace) UpdateGhost(furnacePrefab);
@@ -1127,6 +1389,11 @@ public class Grid_Script : MonoBehaviour
         if (placingSeller) UpdateGhost(sellerPrefab);
         if (placingForge) UpdateGhost(forgePrefab);
         if (placingCraftingTable) UpdateGhost(craftingTablePrefab);
+        if (placingWaterPump && waterPumpPrefab != null) UpdateGhost(waterPumpPrefab);
+        if (placingStraightPipe && straightPipePrefab != null) UpdateGhost(straightPipePrefab);
+        if (placingCornerPipe && cornerPipePrefab != null) UpdateGhost(cornerPipePrefab);
+        if (placingCrossPipe && crossPipePrefab != null) UpdateGhost(crossPipePrefab);
+        if (placingOreWasher && oreWasherPrefab != null) UpdateGhost(oreWasherPrefab);
 
         if (placingItemOnConveyor && itemGhost != null)
         {
@@ -1158,7 +1425,7 @@ public class Grid_Script : MonoBehaviour
             {
                 selected.RotateClockwise();
             }
-            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingAlloyFurnace || placingForge || placingCraftingTable)
+            else if (placingConveyor || placingSplitter || placingMiner || placingFurnace || placingAlloyFurnace || placingForge || placingCraftingTable || placingWaterPump || placingStraightPipe || placingCornerPipe || placingCrossPipe || placingOreWasher)
             {
                 RotatePlacementDirection();
             }
@@ -1179,6 +1446,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingAlloyFurnace = false;
             placingCraftingTable = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             placingItemOnConveyor = false;
             ResetPlacementDirection();
             ClearGhost();
@@ -1210,6 +1482,11 @@ public class Grid_Script : MonoBehaviour
             if (placingMiner) { TryPlaceMiner(cell.x, cell.y); return; }
             if (placingSeller) { TryPlaceSeller(cell.x, cell.y); return; }
             if (placingCraftingTable) { TryPlaceCraftingTable(cell.x, cell.y); return; }
+            if (placingWaterPump) { TryPlaceWaterPump(cell.x, cell.y); return; }
+            if (placingStraightPipe) { TryPlaceStraightPipe(cell.x, cell.y); return; }
+            if (placingCornerPipe) { TryPlaceCornerPipe(cell.x, cell.y); return; }
+            if (placingCrossPipe) { TryPlaceCrossPipe(cell.x, cell.y); return; }
+            if (placingOreWasher) { TryPlaceOreWasher(cell.x, cell.y); return; }
             if (placingItemOnConveyor) { TryAssignItemToConveyor(cell.x, cell.y); return; }
 
             SelectBuildingAt(cell.x, cell.y);
@@ -1222,6 +1499,8 @@ public class Grid_Script : MonoBehaviour
             {
                 if (Buildings[cell.x, cell.y] == null)
                 {
+                    if (IsWaterSourceCell(cell.x, cell.y) && !(selected is WaterPump)) return;
+                    if (selected is WaterPump && !IsWaterSourceCell(cell.x, cell.y)) return;
                     Buildings[selected.x, selected.y] = null;
                     selected.x = cell.x; selected.y = cell.y;
                     Buildings[cell.x, cell.y] = selected;
@@ -1245,6 +1524,11 @@ public class Grid_Script : MonoBehaviour
         if (placingMiner) return minerCost;
         if (placingSeller) return sellerCost;
         if (placingCraftingTable) return craftingTableCost;
+        if (placingWaterPump) return waterPumpCost;
+        if (placingStraightPipe) return straightPipeCost;
+        if (placingCornerPipe) return cornerPipeCost;
+        if (placingCrossPipe) return crossPipeCost;
+        if (placingOreWasher) return oreWasherCost;
         return 0f;
     }
 
@@ -1257,12 +1541,12 @@ public class Grid_Script : MonoBehaviour
         float cost = CurrentPlacementCost();
         UpdateGhostCostLabel(cost);
 
-        if (placingConveyor || placingSplitter)
+        if (placingConveyor || placingSplitter || placingStraightPipe || placingCornerPipe || placingCrossPipe)
         {
             ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             ClearGhostDirectionArrow();
         }
-        else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable)
+        else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable || placingWaterPump || placingOreWasher)
         {
             ghost.transform.rotation = Quaternion.identity;
             UpdateGhostDirectionArrow();
@@ -1336,11 +1620,11 @@ public class Grid_Script : MonoBehaviour
 
         if (ghost != null)
         {
-            if (placingConveyor || placingSplitter)
+            if (placingConveyor || placingSplitter || placingStraightPipe || placingCornerPipe || placingCrossPipe)
             {
                 ghost.transform.rotation = Quaternion.Euler(0, 0, DirToAngle(placementDir));
             }
-            else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable)
+            else if (placingFurnace || placingAlloyFurnace || placingMiner || placingForge || placingCraftingTable || placingWaterPump || placingOreWasher)
             {
                 UpdateGhostDirectionArrow();
             }
@@ -1354,7 +1638,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceConveyor(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
 
         if (!TrySpendMoney(conveyorCost)) return;
 
@@ -1374,7 +1658,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceFurnace(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
         if (furnacePrefab == null) return;
 
         if (!TrySpendMoney(furnaceCost)) return;
@@ -1397,7 +1681,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceAlloyFurnace(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
         if (alloyFurnacePrefab == null && furnacePrefab == null) return;
 
         if (!TrySpendMoney(alloyFurnaceCost)) return;
@@ -1419,7 +1703,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceForge(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
         if (forgePrefab == null) return;
 
         if (!TrySpendMoney(forgeCost)) return;
@@ -1440,7 +1724,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceCraftingTable(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
         if (craftingTablePrefab == null) return;
 
         if (!TrySpendMoney(craftingTableCost)) return;
@@ -1461,7 +1745,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceSplitter(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
 
         if (!TrySpendMoney(splitterCost)) return;
 
@@ -1480,7 +1764,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceSeller(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
 
         if (!TrySpendMoney(sellerCost)) return;
 
@@ -1498,7 +1782,7 @@ public class Grid_Script : MonoBehaviour
 
     void TryPlaceMiner(int x, int y)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
         if (nodes[x, y] == null) return;
 
         if (!TrySpendMoney(minerCost)) return;
@@ -1516,6 +1800,107 @@ public class Grid_Script : MonoBehaviour
 
         Buildings[x, y] = m;
         m.OnMoved();
+    }
+
+    void TryPlaceWaterPump(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null) return;
+        if (!IsWaterSourceCell(x, y)) return;
+        if (waterPumpPrefab == null) return;
+
+        if (!TrySpendMoney(waterPumpCost)) return;
+
+        Dir d = placementDir;
+
+        GameObject go = Instantiate(waterPumpPrefab, CellCenter(x, y), Quaternion.identity);
+
+        WaterPump pump = new WaterPump();
+        pump.x = x; pump.y = y;
+        pump.rot = d;
+        pump.go = go;
+        pump.grid = this;
+        pump.isOnWaterSource = true;
+
+        Buildings[x, y] = pump;
+        pump.OnMoved();
+    }
+
+    void TryPlaceStraightPipe(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        if (straightPipePrefab == null) return;
+        if (!TrySpendMoney(straightPipeCost)) return;
+
+        Dir d = placementDir;
+        GameObject go = Instantiate(straightPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+
+        StraightPipe pipe = new StraightPipe();
+        pipe.x = x; pipe.y = y;
+        pipe.rot = d;
+        pipe.go = go;
+        pipe.grid = this;
+
+        Buildings[x, y] = pipe;
+        pipe.OnMoved();
+    }
+
+    void TryPlaceCornerPipe(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        if (cornerPipePrefab == null) return;
+        if (!TrySpendMoney(cornerPipeCost)) return;
+
+        Dir d = placementDir;
+        GameObject go = Instantiate(cornerPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+
+        CornerPipe pipe = new CornerPipe();
+        pipe.x = x; pipe.y = y;
+        pipe.rot = d;
+        pipe.go = go;
+        pipe.grid = this;
+
+        Buildings[x, y] = pipe;
+        pipe.OnMoved();
+    }
+
+    void TryPlaceCrossPipe(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        if (crossPipePrefab == null) return;
+        if (!TrySpendMoney(crossPipeCost)) return;
+
+        Dir d = placementDir;
+        GameObject go = Instantiate(crossPipePrefab, CellCenter(x, y), Quaternion.Euler(0, 0, DirToAngle(d)));
+
+        CrossPipe pipe = new CrossPipe();
+        pipe.x = x; pipe.y = y;
+        pipe.rot = d;
+        pipe.go = go;
+        pipe.grid = this;
+
+        Buildings[x, y] = pipe;
+        pipe.OnMoved();
+    }
+
+    void TryPlaceOreWasher(int x, int y)
+    {
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        if (oreWasherPrefab == null) return;
+
+        if (!TrySpendMoney(oreWasherCost)) return;
+
+        Dir d = placementDir;
+
+        GameObject go = Instantiate(oreWasherPrefab, CellCenter(x, y), Quaternion.identity);
+
+        OreWasher washer = new OreWasher();
+        washer.x = x; washer.y = y;
+        washer.rot = d;
+        washer.go = go;
+        washer.grid = this;
+
+        Buildings[x, y] = washer;
+        washer.OnMoved();
     }
 
     void TryAssignItemToConveyor(int x, int y)
@@ -1607,6 +1992,11 @@ public class Grid_Script : MonoBehaviour
         if (b is Splitter3) return splitterCost;
         if (b is Seller) return sellerCost;
         if (b is Miner) return minerCost;
+        if (b is WaterPump) return waterPumpCost;
+        if (b is StraightPipe) return straightPipeCost;
+        if (b is CornerPipe) return cornerPipeCost;
+        if (b is CrossPipe) return crossPipeCost;
+        if (b is OreWasher) return oreWasherCost;
         return 0f;
     }
 
@@ -1641,6 +2031,7 @@ public class Grid_Script : MonoBehaviour
             int x = rng.Next(1, GridSizeX - 1);
             int y = rng.Next(1, GridSizeY - 1);
             if (nodes[x, y] != null) continue;
+            if (waterSources[x, y]) continue;
 
             ResourceType res = (ResourceType)rng.Next(0, 3);
             Node n = new Node { resource = res };
@@ -1654,6 +2045,88 @@ public class Grid_Script : MonoBehaviour
 
             placed++;
         }
+    }
+
+    void GenerateWaterSource()
+    {
+        System.Random rng = new System.Random();
+        int attempts = 0;
+        while (attempts < 200)
+        {
+            attempts++;
+            int x = rng.Next(1, GridSizeX - 1);
+            int y = rng.Next(1, GridSizeY - 1);
+            if (waterSources[x, y]) continue;
+
+            waterSources[x, y] = true;
+            if (waterSourcePrefab != null)
+            {
+                Instantiate(waterSourcePrefab, CellCenter(x, y), Quaternion.identity);
+            }
+            break;
+        }
+    }
+
+    void UpdateWaterNetwork()
+    {
+        Queue<Building> queue = new Queue<Building>();
+        for (int x = 0; x < GridSizeX; x++)
+        {
+            for (int y = 0; y < GridSizeY; y++)
+            {
+                var b = Buildings[x, y];
+                if (b != null) b.hasWater = false;
+            }
+        }
+
+        for (int x = 0; x < GridSizeX; x++)
+        {
+            for (int y = 0; y < GridSizeY; y++)
+            {
+                var pump = Buildings[x, y] as WaterPump;
+                if (pump == null) continue;
+                pump.isOnWaterSource = waterSources[x, y];
+                if (!pump.isOnWaterSource) continue;
+
+                pump.hasWater = true;
+                queue.Enqueue(pump);
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            Building current = queue.Dequeue();
+            var connections = current.GetWaterConnections();
+            if (connections == null || connections.Count == 0) continue;
+
+            foreach (var dir in connections)
+            {
+                var step = StepForDir(dir);
+                int nx = current.x + step.dx;
+                int ny = current.y + step.dy;
+                if (!InBounds(nx, ny)) continue;
+
+                var neighbor = Buildings[nx, ny];
+                if (neighbor == null) continue;
+
+                if (!neighbor.GetWaterConnections().Contains(Opposite(dir))) continue;
+
+                if (!neighbor.hasWater)
+                {
+                    neighbor.hasWater = true;
+                    if (neighbor.IsWaterPassThrough())
+                    {
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+        }
+    }
+
+    bool IsWaterSourceCell(int x, int y)
+    {
+        if (!InBounds(x, y)) return false;
+        return waterSources[x, y];
     }
 
     Item CreateItemFromResource(ResourceType res, ItemForm form)
@@ -1697,6 +2170,7 @@ public class Grid_Script : MonoBehaviour
         Item item = new Item(res.ToString() + suffix, res, value, form, go);
         ColorizeItem(item);
         CreateItemValueLabel(item);
+        UpdateWashedIndicator(item);
         return item;
     }
 
@@ -1749,10 +2223,12 @@ public class Grid_Script : MonoBehaviour
         if (item.isAlloy && item.secondaryResource.HasValue)
         {
             ApplyAlloyColors(item);
+            UpdateWashedIndicator(item);
             return;
         }
 
         ColorizeSprite(item.go, item.resource, item.form);
+        UpdateWashedIndicator(item);
     }
 
     Color ColorForResource(ResourceType res, ItemForm form)
@@ -1868,6 +2344,31 @@ public class Grid_Script : MonoBehaviour
 
         cache[key] = halfSprite;
         return halfSprite;
+    }
+
+    void UpdateWashedIndicator(Item item)
+    {
+        if (item == null || item.go == null) return;
+        Transform star = item.go.transform.Find("WashedStar");
+        if (!item.isWashed || washedStarSprite == null)
+        {
+            if (star != null) star.gameObject.SetActive(false);
+            return;
+        }
+
+        if (star == null)
+        {
+            GameObject starGo = new GameObject("WashedStar");
+            starGo.transform.SetParent(item.go.transform);
+            starGo.transform.localPosition = new Vector3(0.18f, 0.18f, -0.02f);
+            starGo.transform.localScale = Vector3.one;
+            var sr = starGo.AddComponent<SpriteRenderer>();
+            sr.sortingOrder = 25;
+            star = starGo.transform;
+        }
+        var starRenderer = star.GetComponent<SpriteRenderer>();
+        if (starRenderer != null) starRenderer.sprite = washedStarSprite;
+        star.gameObject.SetActive(true);
     }
 
     public void UpdateDirectionArrow(ref GameObject arrow, Transform parent, Dir dir)
@@ -2045,6 +2546,18 @@ public class Grid_Script : MonoBehaviour
         }
     }
 
+    static Dir Opposite(Dir d)
+    {
+        switch (d)
+        {
+            case Dir.N: return Dir.S;
+            case Dir.S: return Dir.N;
+            case Dir.E: return Dir.W;
+            case Dir.W: return Dir.E;
+            default: return Dir.N;
+        }
+    }
+
     // ==== Minimal-GUI ====
 
     bool ToggleBuildMenu;
@@ -2061,7 +2574,7 @@ public class Grid_Script : MonoBehaviour
 
         if (!ToggleBuildMenu) return;
 
-        GUI.Box(new Rect(10, 10, 260, 310), "Build");
+        GUI.Box(new Rect(10, 10, 260, 410), "Build");
         if (GUI.Button(new Rect(20, 40, 90, 20), "Conveyor"))
         {
             placingConveyor = true;
@@ -2073,6 +2586,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingAlloyFurnace = false;
             placingCraftingTable = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2088,6 +2606,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingAlloyFurnace = false;
             placingCraftingTable = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2103,6 +2626,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingAlloyFurnace = false;
             placingCraftingTable = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2118,6 +2646,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingAlloyFurnace = false;
             placingCraftingTable = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2134,6 +2667,11 @@ public class Grid_Script : MonoBehaviour
             placingCraftingTable = false;
             placingItemOnConveyor = false;
             placingAlloyFurnace = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2149,6 +2687,11 @@ public class Grid_Script : MonoBehaviour
             placingItemOnConveyor = false;
             placingCraftingTable = false;
             placingAlloyFurnace = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2164,6 +2707,11 @@ public class Grid_Script : MonoBehaviour
             placingMiner = false;
             placingItemOnConveyor = false;
             placingAlloyFurnace = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
@@ -2179,12 +2727,117 @@ public class Grid_Script : MonoBehaviour
             placingSplitter = false;
             placingMiner = false;
             placingItemOnConveyor = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ResetPlacementDirection();
             ClearGhost();
             ClearSelection();
         }
 
-        if (GUI.Button(new Rect(20, 160, 90, 20), "Debug Item"))
+        if (GUI.Button(new Rect(20, 160, 90, 20), "Water Pump"))
+        {
+            placingWaterPump = true;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingSeller = false;
+            placingCraftingTable = false;
+            placingAlloyFurnace = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
+            placingItemOnConveyor = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 160, 90, 20), "Pipe I"))
+        {
+            placingStraightPipe = true;
+            placingWaterPump = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingSeller = false;
+            placingCraftingTable = false;
+            placingAlloyFurnace = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
+            placingItemOnConveyor = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(20, 190, 90, 20), "Pipe L"))
+        {
+            placingCornerPipe = true;
+            placingWaterPump = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingSeller = false;
+            placingCraftingTable = false;
+            placingAlloyFurnace = false;
+            placingStraightPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
+            placingItemOnConveyor = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 190, 90, 20), "Pipe +"))
+        {
+            placingCrossPipe = true;
+            placingWaterPump = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingSeller = false;
+            placingCraftingTable = false;
+            placingAlloyFurnace = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingOreWasher = false;
+            placingItemOnConveyor = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(20, 220, 90, 20), "Ore Washer"))
+        {
+            placingOreWasher = true;
+            placingWaterPump = false;
+            placingConveyor = false;
+            placingFurnace = false;
+            placingForge = false;
+            placingSplitter = false;
+            placingMiner = false;
+            placingSeller = false;
+            placingCraftingTable = false;
+            placingAlloyFurnace = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingItemOnConveyor = false;
+            ResetPlacementDirection();
+            ClearGhost();
+            ClearSelection();
+        }
+        if (GUI.Button(new Rect(120, 220, 90, 20), "Debug Item"))
         {
             placingItemOnConveyor = true;
             placingConveyor = false;
@@ -2195,6 +2848,11 @@ public class Grid_Script : MonoBehaviour
             placingSeller = false;
             placingCraftingTable = false;
             placingAlloyFurnace = false;
+            placingWaterPump = false;
+            placingStraightPipe = false;
+            placingCornerPipe = false;
+            placingCrossPipe = false;
+            placingOreWasher = false;
             ClearGhost();
             ClearSelection();
 
@@ -2210,11 +2868,11 @@ public class Grid_Script : MonoBehaviour
 
         float selectedCost = CurrentPlacementCost();
         string costLabel = selectedCost > 0f ? "Kosten: € " + selectedCost.ToString("F0") : "Kosten: -";
-        GUI.Label(new Rect(20, 280, 220, 20), costLabel);
+        GUI.Label(new Rect(20, 350, 220, 20), costLabel);
 
-        GUI.Label(new Rect(20, 190, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
-        GUI.Label(new Rect(20, 210, 220, 20), "Drag=Bewegen, Pfeil=Ausgaberichtung");
-        GUI.Label(new Rect(20, 230, 220, 20), "Splitter: L/F/R Round-Robin");
-        GUI.Label(new Rect(20, 250, 220, 20), "Miner/Forge nur auf Nodes/Ingot");
+        GUI.Label(new Rect(20, 260, 220, 20), "Klick=Auswahl, R=Rotieren, X=Löschen");
+        GUI.Label(new Rect(20, 280, 220, 20), "Drag=Bewegen, Pfeil=Ausgaberichtung");
+        GUI.Label(new Rect(20, 300, 220, 20), "Splitter: L/F/R Round-Robin");
+        GUI.Label(new Rect(20, 320, 220, 20), "Miner/Forge nur auf Nodes/Ingot");
     }
 }
