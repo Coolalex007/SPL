@@ -6,38 +6,79 @@ using UnityEngine;
 
 public class ServicesInitialization : MonoBehaviour
 {
+    static readonly SemaphoreSlim s_InitLock = new SemaphoreSlim(1, 1);
+    static Task s_InitTask;
+
     async void Awake()
     {
-        await InitializeServicesAsync();
+        await EnsureInitializedAsync();
+    }
+
+    static async Task EnsureInitializedAsync()
+    {
+        if (s_InitTask != null)
+            await s_InitTask;
+
+        await s_InitLock.WaitAsync();
+        try
+        {
+            if (s_InitTask == null)
+            {
+                s_InitTask = InitializeServicesAsync();
+            }
+        }
+        finally
+        {
+            s_InitLock.Release();
+        }
+
+        await s_InitTask;
     }
 
     static async Task InitializeServicesAsync()
     {
-        if (UnityServices.State == ServicesInitializationState.Initialized)
+        if (UnityServices.State != ServicesInitializationState.Initialized)
         {
+            try
+            {
+                await UnityServices.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to initialize Unity Services: {ex}");
+                return;
+            }
+        }
+
+        if (AuthenticationService.Instance.IsSignedIn)
+            return;
+
+        if (AuthenticationService.Instance.IsSigningIn)
+        {
+            await WaitForSignInAsync();
             return;
         }
 
         try
         {
-            await UnityServices.InitializeAsync();
+            await AuthenticationService.Instance.SignInAnonymouslyAsync();
         }
-        catch (Exception ex)
+        catch (AuthenticationException ex)
         {
-            Debug.LogError($"Failed to initialize Unity Services: {ex}");
-            return;
+            Debug.LogError($"Failed to sign in anonymously: {ex}");
         }
+        catch (RequestFailedException ex)
+        {
+            Debug.LogError($"Failed to sign in anonymously: {ex}");
+        }
+    }
 
-        if (!AuthenticationService.Instance.IsSignedIn)
+    static async Task WaitForSignInAsync()
+    {
+        var auth = AuthenticationService.Instance;
+        while (auth.IsSigningIn)
         {
-            try
-            {
-                await AuthenticationService.Instance.SignInAnonymouslyAsync();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Failed to sign in anonymously: {ex}");
-            }
+            await Task.Delay(50);
         }
     }
 }
