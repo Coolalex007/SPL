@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Blocks.Sessions.Common;
 using TMPro;
+using Unity.Netcode;
 using Unity.Services.Multiplayer;
 using UnityEngine;
 using UnityEngine.UI;
@@ -17,6 +18,11 @@ public class SessionUiController : MonoBehaviour
     [SerializeField] TMP_InputField joinSessionCodeInput;
     [SerializeField] Button joinSessionButton;
 
+    GameObject createRoot;
+    GameObject joinRoot;
+    ISession activeSession;
+    bool uiHidden;
+
     void Awake()
     {
         EnsureReferences();
@@ -27,9 +33,11 @@ public class SessionUiController : MonoBehaviour
 
     void EnsureReferences()
     {
+        if (createRoot == null)
+            createRoot = GameObject.Find("Create Session");
+
         if (createSessionNameInput == null || createSessionButton == null)
         {
-            var createRoot = GameObject.Find("Create Session");
             if (createRoot != null)
             {
                 if (createSessionNameInput == null)
@@ -39,9 +47,11 @@ public class SessionUiController : MonoBehaviour
             }
         }
 
+        if (joinRoot == null)
+            joinRoot = GameObject.Find("Join Session By Code");
+
         if (joinSessionCodeInput == null || joinSessionButton == null)
         {
-            var joinRoot = GameObject.Find("Join Session By Code");
             if (joinRoot != null)
             {
                 if (joinSessionCodeInput == null)
@@ -138,6 +148,10 @@ public class SessionUiController : MonoBehaviour
             var hostSession = await MultiplayerService.Instance.CreateSessionAsync(options);
             if (sessionCodeText != null)
                 sessionCodeText.text = hostSession?.Code ?? sessionCodeText.text;
+
+            activeSession = hostSession;
+            SubscribeSessionEvents();
+            StartNetworkHost();
         }
         catch (Exception ex)
         {
@@ -175,7 +189,11 @@ public class SessionUiController : MonoBehaviour
             }
 
             var options = sessionSettings.ToJoinSessionOptions();
-            await MultiplayerService.Instance.JoinSessionByCodeAsync(joinSessionCodeInput.text, options);
+            var session = await MultiplayerService.Instance.JoinSessionByCodeAsync(joinSessionCodeInput.text, options);
+            activeSession = session;
+            SubscribeSessionEvents();
+            StartNetworkClient();
+            HideSessionUi();
         }
         catch (Exception ex)
         {
@@ -185,5 +203,70 @@ public class SessionUiController : MonoBehaviour
         {
             UpdateJoinButtonState();
         }
+    }
+
+    void SubscribeSessionEvents()
+    {
+        if (activeSession == null)
+            return;
+
+        activeSession.PlayerJoined += OnPlayerJoined;
+        activeSession.RemovedFromSession += OnSessionEnded;
+        activeSession.Deleted += OnSessionEnded;
+    }
+
+    void OnPlayerJoined()
+    {
+        if (activeSession?.Players != null && activeSession.Players.Count >= 2)
+            HideSessionUi();
+    }
+
+    void OnSessionEnded()
+    {
+        if (activeSession == null)
+            return;
+
+        activeSession.PlayerJoined -= OnPlayerJoined;
+        activeSession.RemovedFromSession -= OnSessionEnded;
+        activeSession.Deleted -= OnSessionEnded;
+        activeSession = null;
+    }
+
+    void HideSessionUi()
+    {
+        if (uiHidden)
+            return;
+
+        uiHidden = true;
+        if (createRoot != null)
+            createRoot.SetActive(false);
+        if (joinRoot != null)
+            joinRoot.SetActive(false);
+        if (sessionCodeText != null)
+            sessionCodeText.transform.parent?.gameObject.SetActive(false);
+    }
+
+    void StartNetworkHost()
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager is missing in the scene.");
+            return;
+        }
+
+        if (!NetworkManager.Singleton.IsListening)
+            NetworkManager.Singleton.StartHost();
+    }
+
+    void StartNetworkClient()
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager is missing in the scene.");
+            return;
+        }
+
+        if (!NetworkManager.Singleton.IsListening)
+            NetworkManager.Singleton.StartClient();
     }
 }
