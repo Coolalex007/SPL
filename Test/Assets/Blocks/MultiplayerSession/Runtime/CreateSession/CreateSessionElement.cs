@@ -58,7 +58,8 @@ namespace Blocks.Sessions
             var sessionNameBinding = new DataBinding
             {
                 dataSourcePath = new PropertyPath(nameof(m_ViewModel.SessionName)),
-                bindingMode = BindingMode.ToSource
+                bindingMode = BindingMode.ToSource,
+                updateTrigger = BindingUpdateTrigger.OnTargetChanged
             };
             sessionNameTextField.SetBinding("value", sessionNameBinding);
             Add(sessionNameTextField);
