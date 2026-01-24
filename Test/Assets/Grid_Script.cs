@@ -1866,7 +1866,7 @@ public class Grid_Script : NetworkBehaviour
 
     bool TryPlaceConveyor(int x, int y, Dir dir, bool spendMoney)
     {
-        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return;
+        if (!InBounds(x, y) || Buildings[x, y] != null || IsWaterSourceCell(x, y)) return false;
 
         if (spendMoney && !TrySpendMoney(conveyorCost)) return false;
 
