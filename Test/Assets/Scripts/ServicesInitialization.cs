@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
@@ -53,12 +54,6 @@ public class ServicesInitialization : MonoBehaviour
         if (AuthenticationService.Instance.IsSignedIn)
             return;
 
-        if (AuthenticationService.Instance.IsSigningIn)
-        {
-            await WaitForSignInAsync();
-            return;
-        }
-
         try
         {
             await AuthenticationService.Instance.SignInAnonymouslyAsync();
@@ -70,15 +65,6 @@ public class ServicesInitialization : MonoBehaviour
         catch (RequestFailedException ex)
         {
             Debug.LogError($"Failed to sign in anonymously: {ex}");
-        }
-    }
-
-    static async Task WaitForSignInAsync()
-    {
-        var auth = AuthenticationService.Instance;
-        while (auth.IsSigningIn)
-        {
-            await Task.Delay(50);
         }
     }
 }
