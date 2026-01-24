@@ -215,7 +215,7 @@ public class SessionUiController : MonoBehaviour
         activeSession.Deleted += OnSessionEnded;
     }
 
-    void OnPlayerJoined()
+    void OnPlayerJoined(string playerId)
     {
         if (activeSession?.Players != null && activeSession.Players.Count >= 2)
             HideSessionUi();
