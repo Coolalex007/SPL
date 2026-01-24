@@ -54,7 +54,8 @@ namespace Blocks.Sessions
             var sessionCodeBinding = new DataBinding
             {
                 dataSourcePath = new PropertyPath(nameof(m_ViewModel.SessionCode)),
-                bindingMode = BindingMode.ToSource
+                bindingMode = BindingMode.ToSource,
+                updateTrigger = BindingUpdateTrigger.OnTargetChanged
             };
             sessionCodeTextField.SetBinding("value", sessionCodeBinding);
             Add(sessionCodeTextField);
