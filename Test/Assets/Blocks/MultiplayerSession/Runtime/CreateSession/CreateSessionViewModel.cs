@@ -48,14 +48,15 @@ namespace Blocks.Sessions
         public string SessionName
         {
             get => m_SessionName;
-            private set
+            set
             {
-                if (m_SessionName == value)
+                var nextValue = value ?? string.Empty;
+                if (m_SessionName == nextValue)
                     return;
 
-                m_SessionName = value;
+                m_SessionName = nextValue;
 
-                HasSessionName = m_SessionName != "";
+                HasSessionName = !string.IsNullOrWhiteSpace(m_SessionName);
 
                 ++m_UpdateVersion;
                 Notify();
