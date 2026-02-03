@@ -103,6 +103,13 @@ public class SessionUiController : MonoBehaviour
         joinSessionButton.interactable = IsSessionCodeValid(code);
     }
 
+    void ReportStatus(string message)
+    {
+        Debug.LogError(message);
+        if (sessionCodeText != null)
+            sessionCodeText.text = message;
+    }
+
     static bool IsSessionCodeValid(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length is < 6 or > 8)
@@ -133,6 +140,12 @@ public class SessionUiController : MonoBehaviour
             if (string.IsNullOrWhiteSpace(createSessionNameInput?.text))
             {
                 Debug.LogWarning("Create Session: name is empty.");
+                return;
+            }
+
+            if (!await ServicesInitialization.EnsureInitializedAsync())
+            {
+                ReportStatus("Unity Services failed to initialize or sign in.");
                 return;
             }
 
@@ -179,6 +192,12 @@ public class SessionUiController : MonoBehaviour
             if (string.IsNullOrWhiteSpace(joinSessionCodeInput?.text))
             {
                 Debug.LogWarning("Join Session: code is empty.");
+                return;
+            }
+
+            if (!await ServicesInitialization.EnsureInitializedAsync())
+            {
+                ReportStatus("Unity Services failed to initialize or sign in.");
                 return;
             }
 
