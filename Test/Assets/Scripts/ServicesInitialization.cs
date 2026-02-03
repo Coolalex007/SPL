@@ -15,7 +15,7 @@ public class ServicesInitialization : MonoBehaviour
         await EnsureInitializedAsync();
     }
 
-    public static async Task EnsureInitializedAsync()
+    public static async Task<bool> EnsureInitializedAsync()
     {
         if (s_InitTask != null)
             await s_InitTask;
@@ -34,6 +34,11 @@ public class ServicesInitialization : MonoBehaviour
         }
 
         await s_InitTask;
+
+        if (UnityServices.State != ServicesInitializationState.Initialized)
+            return false;
+
+        return AuthenticationService.Instance.IsSignedIn;
     }
 
     static async Task InitializeServicesAsync()

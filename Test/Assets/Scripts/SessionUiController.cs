@@ -103,6 +103,13 @@ public class SessionUiController : MonoBehaviour
         joinSessionButton.interactable = IsSessionCodeValid(code);
     }
 
+    void ReportStatus(string message)
+    {
+        Debug.LogError(message);
+        if (sessionCodeText != null)
+            sessionCodeText.text = message;
+    }
+
     static bool IsSessionCodeValid(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length is < 6 or > 8)
@@ -136,7 +143,11 @@ public class SessionUiController : MonoBehaviour
                 return;
             }
 
-            await ServicesInitialization.EnsureInitializedAsync();
+            if (!await ServicesInitialization.EnsureInitializedAsync())
+            {
+                ReportStatus("Unity Services failed to initialize or sign in.");
+                return;
+            }
 
             if (MultiplayerService.Instance == null)
             {
@@ -184,7 +195,11 @@ public class SessionUiController : MonoBehaviour
                 return;
             }
 
-            await ServicesInitialization.EnsureInitializedAsync();
+            if (!await ServicesInitialization.EnsureInitializedAsync())
+            {
+                ReportStatus("Unity Services failed to initialize or sign in.");
+                return;
+            }
 
             if (MultiplayerService.Instance == null)
             {
