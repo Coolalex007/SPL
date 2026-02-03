@@ -15,7 +15,7 @@ public class ServicesInitialization : MonoBehaviour
         await EnsureInitializedAsync();
     }
 
-    static async Task EnsureInitializedAsync()
+    public static async Task EnsureInitializedAsync()
     {
         if (s_InitTask != null)
             await s_InitTask;

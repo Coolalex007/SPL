@@ -136,6 +136,8 @@ public class SessionUiController : MonoBehaviour
                 return;
             }
 
+            await ServicesInitialization.EnsureInitializedAsync();
+
             if (MultiplayerService.Instance == null)
             {
                 Debug.LogError("Multiplayer Services are not initialized.");
@@ -181,6 +183,8 @@ public class SessionUiController : MonoBehaviour
                 Debug.LogWarning("Join Session: code is empty.");
                 return;
             }
+
+            await ServicesInitialization.EnsureInitializedAsync();
 
             if (MultiplayerService.Instance == null)
             {
