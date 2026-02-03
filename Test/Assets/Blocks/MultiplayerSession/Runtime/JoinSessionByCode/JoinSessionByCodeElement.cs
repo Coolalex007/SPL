@@ -79,9 +79,14 @@ namespace Blocks.Sessions
             RegisterCallback<DetachFromPanelEvent>(_ => CleanupBindings());
         }
 
-        void JoinSession()
+        async void JoinSession()
         {
-            if (!m_ViewModel.AreMultiplayerServicesInitialized())
+            if (!m_SessionSettings)
+            {
+                Debug.LogError("SessionSettings is null, it needs to be assigned in the uxml.");
+                return;
+            }
+            if (!await MultiplayerServicesBootstrapper.EnsureInitializedAsync())
             {
                 Debug.LogError("Multiplayer Services are not initialized. You can initialize them with default settings by adding a Servicesinitialization and PlayerAuthentication components in your scene.");
                 return;

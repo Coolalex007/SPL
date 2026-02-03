@@ -8,7 +8,7 @@ using UnityEngine;
 public class ServicesInitialization : MonoBehaviour
 {
     static readonly SemaphoreSlim s_InitLock = new SemaphoreSlim(1, 1);
-    static Task s_InitTask;
+    static Task<bool> s_InitTask;
 
     async void Awake()
     {
@@ -18,12 +18,16 @@ public class ServicesInitialization : MonoBehaviour
     public static async Task<bool> EnsureInitializedAsync()
     {
         if (s_InitTask != null)
-            await s_InitTask;
+        {
+            var existingResult = await s_InitTask;
+            if (existingResult)
+                return true;
+        }
 
         await s_InitLock.WaitAsync();
         try
         {
-            if (s_InitTask == null)
+            if (s_InitTask == null || (s_InitTask.IsCompleted && !s_InitTask.Result))
             {
                 s_InitTask = InitializeServicesAsync();
             }
@@ -33,15 +37,10 @@ public class ServicesInitialization : MonoBehaviour
             s_InitLock.Release();
         }
 
-        await s_InitTask;
-
-        if (UnityServices.State != ServicesInitializationState.Initialized)
-            return false;
-
-        return AuthenticationService.Instance.IsSignedIn;
+        return await s_InitTask;
     }
 
-    static async Task InitializeServicesAsync()
+    static async Task<bool> InitializeServicesAsync()
     {
         if (UnityServices.State != ServicesInitializationState.Initialized)
         {
@@ -52,12 +51,12 @@ public class ServicesInitialization : MonoBehaviour
             catch (Exception ex)
             {
                 Debug.LogError($"Failed to initialize Unity Services: {ex}");
-                return;
+                return false;
             }
         }
 
         if (AuthenticationService.Instance.IsSignedIn)
-            return;
+            return true;
 
         try
         {
@@ -66,10 +65,14 @@ public class ServicesInitialization : MonoBehaviour
         catch (AuthenticationException ex)
         {
             Debug.LogError($"Failed to sign in anonymously: {ex}");
+            return false;
         }
         catch (RequestFailedException ex)
         {
             Debug.LogError($"Failed to sign in anonymously: {ex}");
+            return false;
         }
+
+        return AuthenticationService.Instance.IsSignedIn;
     }
 }
