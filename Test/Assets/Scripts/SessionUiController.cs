@@ -153,7 +153,8 @@ public class SessionUiController : MonoBehaviour
 
             if (sessionSettings.networkType == NetworkType.Direct)
             {
-                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
+                if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
+                    HideSessionUi();
                 return;
             }
 
@@ -165,7 +166,8 @@ public class SessionUiController : MonoBehaviour
 
             if (sessionSettings.networkType == NetworkType.Direct)
             {
-                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
+                if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
+                    HideSessionUi();
                 return;
             }
 
@@ -229,8 +231,8 @@ public class SessionUiController : MonoBehaviour
                     return;
                 }
 
-                StartDirectClient(address, port);
-                HideSessionUi();
+                if (StartDirectClient(address, port))
+                    HideSessionUi();
                 return;
             }
 
@@ -328,30 +330,38 @@ public class SessionUiController : MonoBehaviour
             NetworkManager.Singleton.StartClient();
     }
 
-    void StartDirectHost(string address, ushort port)
+    bool StartDirectHost(string address, ushort port)
     {
         if (!ConfigureUnityTransport(address, port, isHost: true))
-            return;
+            return false;
 
         if (NetworkManager.Singleton.IsListening)
-            return;
+            return true;
 
         if (NetworkManager.Singleton.StartHost())
         {
             if (sessionCodeText != null)
-                sessionCodeText.text = $"{address}:{port}";
+                sessionCodeText.text = $"{GetAdvertisedAddress(address)}:{port}";
+            return true;
         }
+
+        ReportStatus("Failed to start host. Check NetworkManager/Transport configuration.");
+        return false;
     }
 
-    void StartDirectClient(string address, ushort port)
+    bool StartDirectClient(string address, ushort port)
     {
         if (!ConfigureUnityTransport(address, port, isHost: false))
-            return;
+            return false;
 
         if (NetworkManager.Singleton.IsListening)
-            return;
+            return true;
 
-        NetworkManager.Singleton.StartClient();
+        if (NetworkManager.Singleton.StartClient())
+            return true;
+
+        ReportStatus("Failed to start client. Check IP/port and firewall.");
+        return false;
     }
 
     bool ConfigureUnityTransport(string address, ushort port, bool isHost)
@@ -373,10 +383,32 @@ public class SessionUiController : MonoBehaviour
         transport.ConnectionData.Port = port;
         if (isHost)
         {
-            transport.ConnectionData.ServerListenAddress = address;
+            transport.ConnectionData.ServerListenAddress = "0.0.0.0";
         }
 
         return true;
+    }
+
+    static string GetAdvertisedAddress(string address)
+    {
+        if (!string.IsNullOrWhiteSpace(address) && address != "127.0.0.1" && address != "0.0.0.0")
+            return address;
+
+        try
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    return ip.ToString();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Failed to resolve LAN IP address: {ex.Message}");
+        }
+
+        return "127.0.0.1";
     }
 
     static bool TryParseDirectAddress(string input, out string address, out ushort port)
