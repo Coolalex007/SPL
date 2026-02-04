@@ -163,6 +163,12 @@ public class SessionUiController : MonoBehaviour
                 return;
             }
 
+            if (sessionSettings.networkType == NetworkType.Direct)
+            {
+                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
+                return;
+            }
+
             if (!await ServicesInitialization.EnsureInitializedAsync())
             {
                 ReportStatus("Unity Services failed to initialize or sign in.");
