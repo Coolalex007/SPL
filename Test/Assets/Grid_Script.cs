@@ -2241,16 +2241,19 @@ public class Grid_Script : NetworkBehaviour
     {
         if (selected == null) return;
 
+        var selectedX = selected.x;
+        var selectedY = selected.y;
+
         if (IsServer)
         {
-            if (DeleteBuildingAt(selected.x, selected.y, true))
+            if (DeleteBuildingAt(selectedX, selectedY, true))
             {
-                DeleteBuildingClientRpc(selected.x, selected.y);
+                DeleteBuildingClientRpc(selectedX, selectedY);
             }
         }
         else
         {
-            RequestDeleteBuildingServerRpc(selected.x, selected.y);
+            RequestDeleteBuildingServerRpc(selectedX, selectedY);
         }
     }
 

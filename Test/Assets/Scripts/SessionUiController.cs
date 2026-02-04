@@ -164,8 +164,6 @@ public class SessionUiController : MonoBehaviour
                 {
                     waitingForPlayerToJoin = true;
                     RegisterNetworkCallbacks();
-                    if (sessionCodeText != null)
-                        sessionCodeText.text = "Waiting for another player to join...";
                     Debug.Log("Direct host started. Waiting for another player to join...");
                 }
                 return;
