@@ -339,7 +339,7 @@ public class SessionUiController : MonoBehaviour
         if (NetworkManager.Singleton.StartHost())
         {
             if (sessionCodeText != null)
-                sessionCodeText.text = $"{address}:{port}";
+                sessionCodeText.text = $"{GetAdvertisedAddress(address)}:{port}";
         }
     }
 
@@ -373,10 +373,32 @@ public class SessionUiController : MonoBehaviour
         transport.ConnectionData.Port = port;
         if (isHost)
         {
-            transport.ConnectionData.ServerListenAddress = address;
+            transport.ConnectionData.ServerListenAddress = "0.0.0.0";
         }
 
         return true;
+    }
+
+    static string GetAdvertisedAddress(string address)
+    {
+        if (!string.IsNullOrWhiteSpace(address) && address != "127.0.0.1" && address != "0.0.0.0")
+            return address;
+
+        try
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    return ip.ToString();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Failed to resolve LAN IP address: {ex.Message}");
+        }
+
+        return "127.0.0.1";
     }
 
     static bool TryParseDirectAddress(string input, out string address, out ushort port)
