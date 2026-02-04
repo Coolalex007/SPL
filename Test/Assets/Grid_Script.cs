@@ -1428,6 +1428,9 @@ public class Grid_Script : NetworkBehaviour
 
     void Update()
     {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening && !IsSpawned)
+            return;
+
         HandleHotkeys();
         HandleMouse();
 
