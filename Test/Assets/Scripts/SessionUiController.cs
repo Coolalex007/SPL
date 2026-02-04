@@ -153,7 +153,8 @@ public class SessionUiController : MonoBehaviour
 
             if (sessionSettings.networkType == NetworkType.Direct)
             {
-                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
+                if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
+                    HideSessionUi();
                 return;
             }
 
@@ -165,7 +166,8 @@ public class SessionUiController : MonoBehaviour
 
             if (sessionSettings.networkType == NetworkType.Direct)
             {
-                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
+                if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
+                    HideSessionUi();
                 return;
             }
 
@@ -229,8 +231,8 @@ public class SessionUiController : MonoBehaviour
                     return;
                 }
 
-                StartDirectClient(address, port);
-                HideSessionUi();
+                if (StartDirectClient(address, port))
+                    HideSessionUi();
                 return;
             }
 
@@ -328,30 +330,38 @@ public class SessionUiController : MonoBehaviour
             NetworkManager.Singleton.StartClient();
     }
 
-    void StartDirectHost(string address, ushort port)
+    bool StartDirectHost(string address, ushort port)
     {
         if (!ConfigureUnityTransport(address, port, isHost: true))
-            return;
+            return false;
 
         if (NetworkManager.Singleton.IsListening)
-            return;
+            return true;
 
         if (NetworkManager.Singleton.StartHost())
         {
             if (sessionCodeText != null)
                 sessionCodeText.text = $"{GetAdvertisedAddress(address)}:{port}";
+            return true;
         }
+
+        ReportStatus("Failed to start host. Check NetworkManager/Transport configuration.");
+        return false;
     }
 
-    void StartDirectClient(string address, ushort port)
+    bool StartDirectClient(string address, ushort port)
     {
         if (!ConfigureUnityTransport(address, port, isHost: false))
-            return;
+            return false;
 
         if (NetworkManager.Singleton.IsListening)
-            return;
+            return true;
 
-        NetworkManager.Singleton.StartClient();
+        if (NetworkManager.Singleton.StartClient())
+            return true;
+
+        ReportStatus("Failed to start client. Check IP/port and firewall.");
+        return false;
     }
 
     bool ConfigureUnityTransport(string address, ushort port, bool isHost)
