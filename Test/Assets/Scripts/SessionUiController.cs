@@ -24,6 +24,8 @@ public class SessionUiController : MonoBehaviour
     GameObject joinRoot;
     ISession activeSession;
     bool uiHidden;
+    bool waitingForPlayerToJoin;
+    bool networkCallbacksRegistered;
 
     void Awake()
     {
@@ -31,6 +33,11 @@ public class SessionUiController : MonoBehaviour
         WireUi();
         UpdateCreateButtonState();
         UpdateJoinButtonState();
+    }
+
+    void OnDestroy()
+    {
+        UnregisterNetworkCallbacks();
     }
 
     void EnsureReferences()
@@ -154,20 +161,19 @@ public class SessionUiController : MonoBehaviour
             if (sessionSettings.networkType == NetworkType.Direct)
             {
                 if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
-                    HideSessionUi();
+                {
+                    waitingForPlayerToJoin = true;
+                    RegisterNetworkCallbacks();
+                    if (sessionCodeText != null)
+                        sessionCodeText.text = "Waiting for another player to join...";
+                    Debug.Log("Direct host started. Waiting for another player to join...");
+                }
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(createSessionNameInput?.text))
             {
                 Debug.LogWarning("Create Session: name is empty.");
-                return;
-            }
-
-            if (sessionSettings.networkType == NetworkType.Direct)
-            {
-                if (StartDirectHost(sessionSettings.ipAddress, sessionSettings.port))
-                    HideSessionUi();
                 return;
             }
 
@@ -193,6 +199,11 @@ public class SessionUiController : MonoBehaviour
             activeSession = hostSession;
             SubscribeSessionEvents();
             StartNetworkHost();
+            waitingForPlayerToJoin = true;
+            RegisterNetworkCallbacks();
+            Debug.Log($"Session created with code: {hostSession?.Code ?? "unknown"}");
+            if (sessionCodeText != null)
+                sessionCodeText.text = "Session created. Waiting for another player to join...";
         }
         catch (Exception ex)
         {
@@ -290,6 +301,8 @@ public class SessionUiController : MonoBehaviour
         activeSession.RemovedFromSession -= OnSessionEnded;
         activeSession.Deleted -= OnSessionEnded;
         activeSession = null;
+        waitingForPlayerToJoin = false;
+        UnregisterNetworkCallbacks();
     }
 
     void HideSessionUi()
@@ -298,12 +311,15 @@ public class SessionUiController : MonoBehaviour
             return;
 
         uiHidden = true;
+        waitingForPlayerToJoin = false;
         if (createRoot != null)
             createRoot.SetActive(false);
         if (joinRoot != null)
             joinRoot.SetActive(false);
         if (sessionCodeText != null)
             sessionCodeText.transform.parent?.gameObject.SetActive(false);
+
+        UnregisterNetworkCallbacks();
     }
 
     void StartNetworkHost()
@@ -328,6 +344,38 @@ public class SessionUiController : MonoBehaviour
 
         if (!NetworkManager.Singleton.IsListening)
             NetworkManager.Singleton.StartClient();
+    }
+
+    void RegisterNetworkCallbacks()
+    {
+        if (networkCallbacksRegistered || NetworkManager.Singleton == null)
+            return;
+
+        NetworkManager.Singleton.OnClientConnectedCallback += OnNetworkClientConnected;
+        networkCallbacksRegistered = true;
+    }
+
+    void UnregisterNetworkCallbacks()
+    {
+        if (!networkCallbacksRegistered || NetworkManager.Singleton == null)
+            return;
+
+        NetworkManager.Singleton.OnClientConnectedCallback -= OnNetworkClientConnected;
+        networkCallbacksRegistered = false;
+    }
+
+    void OnNetworkClientConnected(ulong clientId)
+    {
+        if (!waitingForPlayerToJoin || NetworkManager.Singleton == null)
+            return;
+
+        if (!NetworkManager.Singleton.IsHost)
+            return;
+
+        if (clientId == NetworkManager.Singleton.LocalClientId)
+            return;
+
+        HideSessionUi();
     }
 
     bool StartDirectHost(string address, ushort port)
