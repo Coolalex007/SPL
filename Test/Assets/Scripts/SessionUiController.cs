@@ -1,8 +1,10 @@
 using System;
+using System.Net;
 using System.Threading.Tasks;
 using Blocks.Sessions.Common;
 using TMPro;
 using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 using Unity.Services.Multiplayer;
 using UnityEngine;
 using UnityEngine.UI;
@@ -100,6 +102,12 @@ public class SessionUiController : MonoBehaviour
             return;
 
         var code = joinSessionCodeInput.text ?? string.Empty;
+        if (sessionSettings != null && sessionSettings.networkType == NetworkType.Direct)
+        {
+            joinSessionButton.interactable = TryParseDirectAddress(code, out _, out _);
+            return;
+        }
+
         joinSessionButton.interactable = IsSessionCodeValid(code);
     }
 
@@ -140,6 +148,12 @@ public class SessionUiController : MonoBehaviour
             if (string.IsNullOrWhiteSpace(createSessionNameInput?.text))
             {
                 Debug.LogWarning("Create Session: name is empty.");
+                return;
+            }
+
+            if (sessionSettings.networkType == NetworkType.Direct)
+            {
+                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
                 return;
             }
 
@@ -192,6 +206,19 @@ public class SessionUiController : MonoBehaviour
             if (string.IsNullOrWhiteSpace(joinSessionCodeInput?.text))
             {
                 Debug.LogWarning("Join Session: code is empty.");
+                return;
+            }
+
+            if (sessionSettings.networkType == NetworkType.Direct)
+            {
+                if (!TryParseDirectAddress(joinSessionCodeInput.text, out var address, out var port))
+                {
+                    ReportStatus("Invalid LAN address. Use IP or IP:port.");
+                    return;
+                }
+
+                StartDirectClient(address, port);
+                HideSessionUi();
                 return;
             }
 
@@ -287,5 +314,91 @@ public class SessionUiController : MonoBehaviour
 
         if (!NetworkManager.Singleton.IsListening)
             NetworkManager.Singleton.StartClient();
+    }
+
+    void StartDirectHost(string address, ushort port)
+    {
+        if (!ConfigureUnityTransport(address, port, isHost: true))
+            return;
+
+        if (NetworkManager.Singleton.IsListening)
+            return;
+
+        if (NetworkManager.Singleton.StartHost())
+        {
+            if (sessionCodeText != null)
+                sessionCodeText.text = $"{address}:{port}";
+        }
+    }
+
+    void StartDirectClient(string address, ushort port)
+    {
+        if (!ConfigureUnityTransport(address, port, isHost: false))
+            return;
+
+        if (NetworkManager.Singleton.IsListening)
+            return;
+
+        NetworkManager.Singleton.StartClient();
+    }
+
+    bool ConfigureUnityTransport(string address, ushort port, bool isHost)
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError("NetworkManager is missing in the scene.");
+            return false;
+        }
+
+        var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        if (transport == null)
+        {
+            Debug.LogError("UnityTransport is missing on the NetworkManager.");
+            return false;
+        }
+
+        transport.ConnectionData.Address = address;
+        transport.ConnectionData.Port = port;
+        if (isHost)
+        {
+            transport.ConnectionData.ServerListenAddress = address;
+        }
+
+        return true;
+    }
+
+    static bool TryParseDirectAddress(string input, out string address, out ushort port)
+    {
+        address = string.Empty;
+        port = 0;
+
+        if (string.IsNullOrWhiteSpace(input))
+            return false;
+
+        var trimmed = input.Trim();
+        var parts = trimmed.Split(':');
+        if (parts.Length == 1)
+        {
+            if (!IPAddress.TryParse(parts[0], out _))
+                return false;
+
+            address = parts[0];
+            port = 7777;
+            return true;
+        }
+
+        if (parts.Length == 2)
+        {
+            if (!IPAddress.TryParse(parts[0], out _))
+                return false;
+
+            if (!ushort.TryParse(parts[1], out port))
+                return false;
+
+            address = parts[0];
+            return true;
+        }
+
+        return false;
     }
 }
