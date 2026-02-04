@@ -93,6 +93,12 @@ public class SessionUiController : MonoBehaviour
         if (createSessionButton == null || createSessionNameInput == null)
             return;
 
+        if (sessionSettings != null && sessionSettings.networkType == NetworkType.Direct)
+        {
+            createSessionButton.interactable = true;
+            return;
+        }
+
         createSessionButton.interactable = !string.IsNullOrWhiteSpace(createSessionNameInput.text);
     }
 
@@ -142,6 +148,12 @@ public class SessionUiController : MonoBehaviour
             if (sessionSettings == null)
             {
                 Debug.LogError("SessionSettings is not assigned.");
+                return;
+            }
+
+            if (sessionSettings.networkType == NetworkType.Direct)
+            {
+                StartDirectHost(sessionSettings.ipAddress, sessionSettings.port);
                 return;
             }
 
